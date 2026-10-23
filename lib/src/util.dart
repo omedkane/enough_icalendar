@@ -8,6 +8,9 @@ class Rune {
   /// LF, \n on Unix systems
   static const int runeLineFeed = 10;
 
+  /// CR, \r
+  static const int runeCarriageReturn = 13;
+
   /// space
   static const int runeSpace = 32;
 
@@ -22,6 +25,9 @@ class Rune {
 
   /// ;
   static const int runeSemicolon = 59;
+
+  /// =
+  static const int runeEquals = 61;
 
   /// backslash \
   static const int runeBackslash = 92;

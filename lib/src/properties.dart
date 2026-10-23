@@ -9,16 +9,45 @@ class Property {
     this.definition,
     ValueType defaultValueType, {
     dynamic Function(Property property, String textValue)? parser,
-  }) : name = _getName(definition),
-       textValue = _getTextContent(definition),
-       parameters = _parseParameters(definition) {
-    value = parser != null
-        ? parser(this, textValue)
-        : _parsePropertyValue(this, defaultValueType);
+  }) : name = identical(definition, _pendingDefinition)
+           ? _pendingName!
+           : _populatePending(definition),
+       textValue = _pendingTextValue!,
+       _parameters = _pendingParameters {
+    _pendingDefinition = null;
+    _pendingName = null;
+    _pendingTextValue = null;
+    final params = _pendingParameters;
+    _pendingParameters = null;
+    if (parser != null) {
+      _value = parser(this, textValue);
+      _isValueParsed = true;
+    } else {
+      final valueType =
+          (params?['VALUE'] as ValueParameter?)?.valueType ?? defaultValueType;
+      if (valueType != ValueType.text) {
+        _value = _parsePropertyValueWithType(this, valueType);
+        _isValueParsed = true;
+      }
+    }
   }
 
+  dynamic _value;
+  bool _isValueParsed = false;
+
   /// The value of this property
-  late dynamic value;
+  dynamic get value {
+    if (!_isValueParsed) {
+      _value = TextProperty.parseText(textValue);
+      _isValueParsed = true;
+    }
+    return _value;
+  }
+
+  set value(dynamic val) {
+    _value = val;
+    _isValueParsed = true;
+  }
 
   /// Full property content, e.g.
   /// `DTSTAMP;TZID=America/New_York:19970610T172345Z`
@@ -30,9 +59,12 @@ class Property {
   /// Value of the property, e.g. `19970610T172345Z`
   final String textValue;
 
+  Map<String, Parameter>? _parameters;
+
   /// Additional parameters for this property, e.g.
   /// `{'TZID' : TextValueType('America/New_York')}}
-  final Map<String, Parameter> parameters;
+  Map<String, Parameter> get parameters =>
+      _parameters ??= <String, Parameter>{};
 
   /// Parses this property.
   ///
@@ -45,7 +77,7 @@ class Property {
   }
 
   /// Retrieves the parameter with the given [type]
-  Parameter? operator [](ParameterType type) => parameters[type.typeName];
+  Parameter? operator [](ParameterType type) => _parameters?[type.typeName];
 
   /// Sets the parameter [value] for the given [type]
   void operator []=(ParameterType type, Parameter value) =>
@@ -58,7 +90,7 @@ class Property {
   /// and removes the parameter when [value] is null.
   void setOrRemoveParameter(ParameterType type, Parameter? value) {
     if (value == null) {
-      parameters.remove(type.typeName);
+      _parameters?.remove(type.typeName);
     } else {
       parameters[type.typeName ?? ''] = value;
     }
@@ -66,134 +98,74 @@ class Property {
 
   /// Retrieves the parameter value for [type]
   T? getParameterValue<T>(ParameterType type) =>
-      parameters[type.typeName]?.value as T?;
+      _parameters?[type.typeName]?.value as T?;
 
-  static String? _lastContent;
-  static List<int>? _lastRunes;
-  static int _getNameEndIndex(String content) => _getIndex(content);
-  static int _getValueStartIndex(String content) =>
-      _getIndex(content, searchNameEndIndex: false);
+  static String? _pendingDefinition;
+  static String? _pendingName;
+  static String? _pendingTextValue;
+  static Map<String, Parameter>? _pendingParameters;
 
-  static int _getIndex(String content, {bool searchNameEndIndex = true}) {
-    final lastRunes = _lastRunes;
-    final runes = content == _lastContent && lastRunes != null
-        ? lastRunes
-        : content.runes.toList();
+  static int _findNameEnd(String content) {
+    final len = content.length;
+    for (var i = 0; i < len; i++) {
+      final c = content.codeUnitAt(i);
+      if (c == Rune.runeColon || c == Rune.runeSemicolon) {
+        return i;
+      }
+    }
+    throw FormatException('Invalid property: no colon : found in [$content]');
+  }
+
+  static String _populatePending(String content) {
+    final nameEndIndex = _findNameEnd(content);
+    final name = content.substring(0, nameEndIndex);
+    if (content.codeUnitAt(nameEndIndex) == Rune.runeColon) {
+      _pendingDefinition = content;
+      _pendingName = name;
+      _pendingTextValue = content.substring(nameEndIndex + 1);
+      _pendingParameters = null;
+      return name;
+    }
+    final parameters = <String, Parameter>{};
+    final len = content.length;
+    var paramStart = nameEndIndex + 1;
     var isInQuote = false;
     var isLastBackSlash = false;
-    int? index;
-    for (var i = 0; i < runes.length; i++) {
-      final rune = runes[i];
+    for (var i = paramStart; i < len; i++) {
+      final c = content.codeUnitAt(i);
       if (isLastBackSlash) {
         isLastBackSlash = false;
-      } else {
-        if (rune == Rune.runeDoubleQuote) {
-          isInQuote = !isInQuote;
-        } else {
-          if (rune == Rune.runeBackslash) {
-            isLastBackSlash = true;
-          } else if (!isInQuote) {
-            if (rune == Rune.runeColon) {
-              index = i;
-              break;
-            } else if (searchNameEndIndex && rune == Rune.runeSemicolon) {
-              index = i;
-              break;
-            }
+      } else if (c == Rune.runeDoubleQuote) {
+        isInQuote = !isInQuote;
+      } else if (c == Rune.runeBackslash) {
+        isLastBackSlash = true;
+      } else if (!isInQuote) {
+        if (c == Rune.runeSemicolon || c == Rune.runeColon) {
+          final parameterText = content.substring(paramStart, i);
+          try {
+            final parameter = Parameter.parse(parameterText);
+            parameters[parameter.name] = parameter;
+          } on FormatException catch (e) {
+            throw FormatException('${e.message} in property $content');
           }
-        }
-      }
-    }
-    if (index == null) {
-      throw FormatException('Invalid property: no colon : found in [$content]');
-    }
-    _lastContent = content;
-    _lastRunes = runes;
-
-    return index;
-  }
-
-  static String _getName(String content) {
-    final nameEndIndex = _getNameEndIndex(content);
-
-    return content.substring(0, nameEndIndex);
-  }
-
-  static String _getTextContent(String content) {
-    final valueStartIndex = _getValueStartIndex(content);
-
-    return content.substring(valueStartIndex + 1);
-  }
-
-  static int? _getNextParameterStartIndex(List<int> runes, int startIndex) {
-    var isInQuote = false;
-    var isLastBackSlash = false;
-    for (var i = startIndex; i < runes.length; i++) {
-      final rune = runes[i];
-      if (isLastBackSlash) {
-        isLastBackSlash = false;
-      } else {
-        if (rune == Rune.runeDoubleQuote) {
-          isInQuote = !isInQuote;
-        } else {
-          if (rune == Rune.runeBackslash) {
-            isLastBackSlash = true;
-          } else if (!isInQuote) {
-            if (rune == Rune.runeColon) {
-              return i;
-            } else if (rune == Rune.runeSemicolon) {
-              return i;
-            }
+          if (c == Rune.runeColon) {
+            _pendingDefinition = content;
+            _pendingName = name;
+            _pendingTextValue = content.substring(i + 1);
+            _pendingParameters = parameters;
+            return name;
           }
+          paramStart = i + 1;
         }
       }
     }
-
-    return null;
+    throw FormatException('Invalid property: no colon : found in [$content]');
   }
 
-  static Map<String, Parameter> _parseParameters(String content) {
-    final result = <String, Parameter>{};
-    final nameEndIndex = _getNameEndIndex(content);
-    final valueStartIndex = _getValueStartIndex(content);
-    if (valueStartIndex > nameEndIndex + 1) {
-      final parametersText = content.substring(
-        nameEndIndex + 1,
-        valueStartIndex,
-      );
-      final runes = parametersText.runes.toList();
-      var lastStartIndex = 0;
-      int? nextStartIndex;
-      while (true) {
-        nextStartIndex = _getNextParameterStartIndex(runes, lastStartIndex);
-        final parameterText = nextStartIndex == null
-            ? parametersText.substring(lastStartIndex)
-            : parametersText.substring(lastStartIndex, nextStartIndex);
-        try {
-          final parameter = Parameter.parse(parameterText);
-          result[parameter.name] = parameter;
-        } on FormatException catch (e, s) {
-          print(e.message);
-          print(s);
-          throw FormatException('${e.message} in property $content');
-        }
-        if (nextStartIndex == null) {
-          break;
-        }
-        lastStartIndex = nextStartIndex + 1;
-      }
-    }
-
-    return result;
-  }
-
-  static dynamic _parsePropertyValue(
+  static dynamic _parsePropertyValueWithType(
     Property property,
-    ValueType defaultValueType,
+    ValueType valueType,
   ) {
-    final valueType =
-        (property[ParameterType.value] as ValueParameter?)?.valueType ??
-        defaultValueType;
     final textValue = property.textValue;
     switch (valueType) {
       case ValueType.binary:
@@ -215,10 +187,19 @@ class Property {
       case ValueType.float:
         return double.parse(textValue);
       case ValueType.integer:
+        if (textValue.length == 1) {
+          final d = textValue.codeUnitAt(0) ^ 0x30;
+          if (d <= 9) {
+            return d;
+          }
+        }
         return int.parse(textValue);
       case ValueType.period:
         return Period.parse(textValue);
       case ValueType.periodList:
+        if (!textValue.contains(',')) {
+          return <Period>[Period.parse(textValue)];
+        }
         return textValue.split(',').map(Period.parse).toList();
       case ValueType.recurrence:
         return Recurrence.parse(textValue);
@@ -248,6 +229,11 @@ class Property {
           'invalid valueType of $valueType',
         );
       case ValueType.typeDateTimeList:
+        if (!textValue.contains(',')) {
+          return <DateTimeOrDuration>[
+            DateTimeOrDuration(DateHelper.parseDateTime(textValue), null),
+          ];
+        }
         return textValue
             .split(',')
             .map((text) => DateTimeOrDuration.parse(text, ValueType.dateTime))
@@ -264,96 +250,102 @@ class Property {
     String definition, {
     Property? Function(String name, String definition)? customParser,
   }) {
-    final name = _getName(definition);
-    switch (name) {
-      case TextProperty.propertyNameUid:
-      case TextProperty.propertyNameProductIdentifier:
-      case TextProperty.propertyNameComment:
-      case TextProperty.propertyNameDescription:
-      case TextProperty.propertyNameSummary:
-      case TextProperty.propertyNameLocation:
-      case TextProperty.propertyNameResources:
-      case TextProperty.propertyNameTimezoneId:
-      case TextProperty.propertyNameTimezoneName:
-      case TextProperty.propertyNameRelatedTo:
-      case TextProperty.propertyNameXWrTimezone:
-      case TextProperty.propertyNameXTimezoneLocation:
-      case TextProperty.propertyNameXCalendarName:
-      case TextProperty.propertyNameXMicrosoftSkypeTeamsMeetingUrl:
-        return TextProperty(definition);
-      case DateTimeProperty.propertyNameCompleted:
-      case DateTimeProperty.propertyNameDue:
-      case DateTimeProperty.propertyNameEnd:
-      case DateTimeProperty.propertyNameStart:
-      case DateTimeProperty.propertyNameTimeStamp:
-      case DateTimeProperty.propertyNameCreated:
-      case DateTimeProperty.propertyNameLastModified:
-      case DateTimeProperty.propertyNameRecurrenceId:
-        return DateTimeProperty(definition);
-      case IntegerProperty.propertyNamePercentComplete:
-      case IntegerProperty.propertyNameSequence:
-      case IntegerProperty.propertyNameRepeat:
-        return IntegerProperty(definition);
-      case BooleanProperty.propertyNameAllDayEvent:
-        return BooleanProperty(definition);
-      case CalendarScaleProperty.propertyName:
-        return CalendarScaleProperty(definition);
-      case UtfOffsetProperty.propertyNameTimezoneOffsetFrom:
-      case UtfOffsetProperty.propertyNameTimezoneOffsetTo:
-        return UtfOffsetProperty(definition);
-      case RecurrenceRuleProperty.propertyName:
-        return RecurrenceRuleProperty(definition);
-      case UriProperty.propertyNameTimezoneUrl:
-      case UriProperty.propertyNameUrl:
-        return UriProperty(definition);
-      case GeoProperty.propertyName:
-        return GeoProperty(definition);
-      case AttendeeProperty.propertyName:
-        return AttendeeProperty(definition);
-      case OrganizerProperty.propertyName:
-        return OrganizerProperty(definition);
-      case UserProperty.propertyNameContact:
-        return UserProperty(definition);
-      case VersionProperty.propertyName:
-        return VersionProperty(definition);
-      case AttachmentProperty.propertyName:
-        return AttachmentProperty(definition);
-      case CategoriesProperty.propertyName:
-        return CategoriesProperty(definition);
-      case ClassificationProperty.propertyName:
-        return ClassificationProperty(definition);
-      case PriorityProperty.propertyName:
-        return PriorityProperty(definition);
-      case StatusProperty.propertyName:
-        return StatusProperty(definition);
-      case DurationProperty.propertyName:
-        return DurationProperty(definition);
-      case TimeTransparencyProperty.propertyName:
-        return TimeTransparencyProperty(definition);
-      case FreeBusyProperty.propertyName:
-        return FreeBusyProperty(definition);
-      case ActionProperty.propertyName:
-        return ActionProperty(definition);
-      case TriggerProperty.propertyName:
-        return TriggerProperty(definition);
-      case RecurrenceDateProperty.propertyNameRDate:
-      case RecurrenceDateProperty.propertyNameExDate:
-        return RecurrenceDateProperty(definition);
-      case MethodProperty.propertyName:
-        return MethodProperty(definition);
-      case RequestStatusProperty.propertyName:
-        return RequestStatusProperty(definition);
-      case EventBusyStatusProperty.propertyName:
-        return EventBusyStatusProperty(definition);
-      default:
-        if (customParser != null) {
-          final prop = customParser(name, definition);
-          if (prop != null) {
-            return prop;
+    final name = _populatePending(definition);
+    try {
+      switch (name) {
+        case TextProperty.propertyNameUid:
+        case TextProperty.propertyNameProductIdentifier:
+        case TextProperty.propertyNameComment:
+        case TextProperty.propertyNameDescription:
+        case TextProperty.propertyNameSummary:
+        case TextProperty.propertyNameLocation:
+        case TextProperty.propertyNameResources:
+        case TextProperty.propertyNameTimezoneId:
+        case TextProperty.propertyNameTimezoneName:
+        case TextProperty.propertyNameRelatedTo:
+        case TextProperty.propertyNameXWrTimezone:
+        case TextProperty.propertyNameXTimezoneLocation:
+        case TextProperty.propertyNameXCalendarName:
+        case TextProperty.propertyNameXMicrosoftSkypeTeamsMeetingUrl:
+          return TextProperty(definition);
+        case DateTimeProperty.propertyNameCompleted:
+        case DateTimeProperty.propertyNameDue:
+        case DateTimeProperty.propertyNameEnd:
+        case DateTimeProperty.propertyNameStart:
+        case DateTimeProperty.propertyNameTimeStamp:
+        case DateTimeProperty.propertyNameCreated:
+        case DateTimeProperty.propertyNameLastModified:
+        case DateTimeProperty.propertyNameRecurrenceId:
+          return DateTimeProperty(definition);
+        case IntegerProperty.propertyNamePercentComplete:
+        case IntegerProperty.propertyNameSequence:
+        case IntegerProperty.propertyNameRepeat:
+          return IntegerProperty(definition);
+        case BooleanProperty.propertyNameAllDayEvent:
+          return BooleanProperty(definition);
+        case CalendarScaleProperty.propertyName:
+          return CalendarScaleProperty(definition);
+        case UtfOffsetProperty.propertyNameTimezoneOffsetFrom:
+        case UtfOffsetProperty.propertyNameTimezoneOffsetTo:
+          return UtfOffsetProperty(definition);
+        case RecurrenceRuleProperty.propertyName:
+          return RecurrenceRuleProperty(definition);
+        case UriProperty.propertyNameTimezoneUrl:
+        case UriProperty.propertyNameUrl:
+          return UriProperty(definition);
+        case GeoProperty.propertyName:
+          return GeoProperty(definition);
+        case AttendeeProperty.propertyName:
+          return AttendeeProperty(definition);
+        case OrganizerProperty.propertyName:
+          return OrganizerProperty(definition);
+        case UserProperty.propertyNameContact:
+          return UserProperty(definition);
+        case VersionProperty.propertyName:
+          return VersionProperty(definition);
+        case AttachmentProperty.propertyName:
+          return AttachmentProperty(definition);
+        case CategoriesProperty.propertyName:
+          return CategoriesProperty(definition);
+        case ClassificationProperty.propertyName:
+          return ClassificationProperty(definition);
+        case PriorityProperty.propertyName:
+          return PriorityProperty(definition);
+        case StatusProperty.propertyName:
+          return StatusProperty(definition);
+        case DurationProperty.propertyName:
+          return DurationProperty(definition);
+        case TimeTransparencyProperty.propertyName:
+          return TimeTransparencyProperty(definition);
+        case FreeBusyProperty.propertyName:
+          return FreeBusyProperty(definition);
+        case ActionProperty.propertyName:
+          return ActionProperty(definition);
+        case TriggerProperty.propertyName:
+          return TriggerProperty(definition);
+        case RecurrenceDateProperty.propertyNameRDate:
+        case RecurrenceDateProperty.propertyNameExDate:
+          return RecurrenceDateProperty(definition);
+        case MethodProperty.propertyName:
+          return MethodProperty(definition);
+        case RequestStatusProperty.propertyName:
+          return RequestStatusProperty(definition);
+        case EventBusyStatusProperty.propertyName:
+          return EventBusyStatusProperty(definition);
+        default:
+          if (customParser != null) {
+            final prop = customParser(name, definition);
+            if (prop != null) {
+              return prop;
+            }
           }
-        }
-        print('No property implementation found for $definition');
-        return Property(definition, ValueType.text);
+          return Property(definition, ValueType.text);
+      }
+    } finally {
+      _pendingDefinition = null;
+      _pendingName = null;
+      _pendingTextValue = null;
+      _pendingParameters = null;
     }
   }
 
@@ -361,8 +353,9 @@ class Property {
   /// wrapping lines and without `CRLF` at the end.
   void render(final StringBuffer buffer) {
     buffer.write(name);
-    if (parameters.isNotEmpty) {
-      for (final parameter in parameters.values) {
+    final params = _parameters;
+    if (params != null && params.isNotEmpty) {
+      for (final parameter in params.values) {
         buffer
           ..write(';')
           ..write(parameter.name)
@@ -1074,8 +1067,12 @@ class TextProperty extends Property {
   }
 
   /// Parses the [textValue] by unescaping commas and newline characters.
-  static String parseText(String textValue) =>
-      textValue.replaceAll('\\,', ',').replaceAll('\\n', '\n');
+  static String parseText(String textValue) {
+    if (!textValue.contains(r'\')) {
+      return textValue;
+    }
+    return textValue.replaceAll(r'\,', ',').replaceAll(r'\n', '\n');
+  }
 }
 
 /// Property that defines the iTIP method.

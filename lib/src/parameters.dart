@@ -74,7 +74,6 @@ abstract class Parameter<T> {
       case 'EMAIL':
         return TextParameter(name, textValue);
       default:
-        print('Encountered unsupported parameter [$name]');
         return TextParameter(name, textValue);
     }
   }
@@ -94,13 +93,18 @@ class UriParameter extends Parameter<Uri> {
 
   /// Parses the given [textValue] as an URI
   static Uri parse(String textValue) {
-    var usedValue = textValue;
-    if (usedValue.startsWith('"')) {
-      usedValue = usedValue.substring(1, usedValue.length - 1);
+    var start = 0;
+    var end = textValue.length;
+    if (end >= 2 && textValue.codeUnitAt(0) == Rune.runeDoubleQuote) {
+      start = 1;
+      end -= 1;
     }
-    if (usedValue.startsWith(':')) {
-      usedValue = usedValue.substring(1);
+    if (start < end && textValue.codeUnitAt(start) == Rune.runeColon) {
+      start++;
     }
+    final usedValue = (start == 0 && end == textValue.length)
+        ? textValue
+        : textValue.substring(start, end);
 
     return Uri.parse(usedValue);
   }
@@ -130,13 +134,13 @@ class UriListParameter extends Parameter<List<Uri>> {
 
   /// Parses the given [textValue]
   static List<Uri> parse(final String textValue) {
-    final runes = textValue.runes.toList();
+    final len = textValue.length;
     final result = <Uri>[];
     var isInQuote = false;
     var isLastBackslash = false;
     var lastQuoteStart = 0;
-    for (var i = 0; i < runes.length; i++) {
-      final rune = runes[i];
+    for (var i = 0; i < len; i++) {
+      final rune = textValue.codeUnitAt(i);
       if (isLastBackslash) {
         // ignore this char
         isLastBackslash = false;
@@ -206,7 +210,8 @@ class TextParameter extends Parameter<String> {
 
   /// Parses the [textValue]
   static String parse(String textValue) {
-    if (textValue.startsWith('"')) {
+    if (textValue.length >= 2 &&
+        textValue.codeUnitAt(0) == Rune.runeDoubleQuote) {
       return textValue.substring(1, textValue.length - 1);
     }
 

@@ -879,229 +879,454 @@ class Recurrence {
     return encoder.convert(this, startDate: startDate);
   }
 
-  static String? _lastContent;
-  static Map<String, String>? _lastResult;
-  static Map<String, String> _split(String content) {
-    final lastResult = _lastResult;
-    if (content == _lastContent && lastResult != null) {
-      return lastResult;
+  static const _constByDayRules = <ByDayRule>[
+    ByDayRule(DateTime.monday),
+    ByDayRule(DateTime.tuesday),
+    ByDayRule(DateTime.wednesday),
+    ByDayRule(DateTime.thursday),
+    ByDayRule(DateTime.friday),
+    ByDayRule(DateTime.saturday),
+    ByDayRule(DateTime.sunday),
+  ];
+
+  static int? _weekdayFromCodeUnits(int c0, int c1) {
+    // MO, TU, WE, TH, FR, SA, SU
+    switch (c0) {
+      case 0x4D: // 'M'
+        return c1 == 0x4F /* 'O' */ ? DateTime.monday : null;
+      case 0x54: // 'T'
+        if (c1 == 0x55 /* 'U' */ ) {
+          return DateTime.tuesday;
+        }
+        if (c1 == 0x48 /* 'H' */ ) {
+          return DateTime.thursday;
+        }
+        return null;
+      case 0x57: // 'W'
+        return c1 == 0x45 /* 'E' */ ? DateTime.wednesday : null;
+      case 0x46: // 'F'
+        return c1 == 0x52 /* 'R' */ ? DateTime.friday : null;
+      case 0x53: // 'S'
+        if (c1 == 0x41 /* 'A' */ ) {
+          return DateTime.saturday;
+        }
+        if (c1 == 0x55 /* 'U' */ ) {
+          return DateTime.sunday;
+        }
+        return null;
+      default:
+        return null;
     }
-    final result = <String, String>{};
-    final pairs = content.split(';');
-    for (final pair in pairs) {
-      final index = pair.indexOf('=');
-      if (index != -1) {
-        result[pair.substring(0, index)] = pair.substring(index + 1);
-      } else {
-        result[pair] = '';
+  }
+
+  static int? _tryParseIntSlice(String s, int start, int end) {
+    if (start >= end) {
+      return null;
+    }
+    var i = start;
+    var isNegative = false;
+    final first = s.codeUnitAt(i);
+    if (first == 0x2D /* '-' */ ) {
+      isNegative = true;
+      i++;
+    } else if (first == 0x2B /* '+' */ ) {
+      i++;
+    }
+    if (i >= end) {
+      return null;
+    }
+    var value = 0;
+    for (; i < end; i++) {
+      final digit = s.codeUnitAt(i) ^ 0x30;
+      if (digit > 9) {
+        return null;
       }
+      value = value * 10 + digit;
     }
-    _lastResult = result;
-    _lastContent = content;
-    return result;
+    return isNegative ? -value : value;
   }
 
-  static RecurrenceFrequency _parseFrequency(String content) {
-    final freq = _split(content)['FREQ'];
-    if (freq == null) {
-      throw FormatException('No FREQ found in RECUR $content');
-    }
-    switch (freq) {
-      case 'SECONDLY':
-        return RecurrenceFrequency.secondly;
-      case 'MINUTELY':
-        return RecurrenceFrequency.minutely;
-      case 'HOURLY':
-        return RecurrenceFrequency.hourly;
-      case 'DAILY':
-        return RecurrenceFrequency.daily;
-      case 'WEEKLY':
-        return RecurrenceFrequency.weekly;
-      case 'MONTHLY':
-        return RecurrenceFrequency.monthly;
-      case 'YEARLY':
-        return RecurrenceFrequency.yearly;
-    }
-    throw FormatException('Invalid FREQ value: $freq in RECUR $content');
-  }
-
-  static DateTime? _parseUntil(String content) {
-    final until = _split(content)['UNTIL'];
-    if (until == null) {
-      return null;
-    }
-    if (until.contains('T')) {
-      return DateHelper.parseDateTime(until);
-    }
-
-    return DateHelper.parseDate(until);
-  }
-
-  static int? _parseIntValue(String content, String fieldName) {
-    final text = _split(content)[fieldName];
-    if (text == null) {
-      return null;
-    }
-    final value = int.tryParse(text);
+  static int _parseIntSlice(
+    String content,
+    int start,
+    int end,
+    String fieldName,
+  ) {
+    final value = _tryParseIntSlice(content, start, end);
     if (value == null) {
-      throw FormatException('Invalid $fieldName $text in RECUR $content');
+      throw FormatException(
+        'Invalid $fieldName ${content.substring(start, end)} '
+        'in RECUR $content',
+      );
     }
-
     return value;
   }
 
-  static int? _parseCount(String content) => _parseIntValue(content, 'COUNT');
-
-  static int? _parseInterval(String content) =>
-      _parseIntValue(content, 'INTERVAL');
-
-  static List<String>? _parseStringList(String content, String fieldName) {
-    final listText = _split(content)[fieldName];
-    if (listText == null) {
-      return null;
-    }
-
-    return listText.split(',');
-  }
-
-  static List<int>? _parseIntList(
+  static List<int> _parseIntListSlice(
     String content,
+    int start,
+    int end,
     String fieldName,
     int allowedMin,
     int allowedMax, [
     int? disallowedValue,
   ]) {
-    final texts = _parseStringList(content, fieldName);
-    if (texts == null) {
-      return null;
+    if (start >= end) {
+      throw FormatException('Invalid $fieldName: empty in RECUR $content');
     }
     final result = <int>[];
-    for (final text in texts) {
-      final value = int.tryParse(text);
-      if (value == null ||
-          value < allowedMin ||
-          value > allowedMax ||
-          value == disallowedValue) {
-        throw FormatException(
-          'Invalid $fieldName: part $text invalid in RECUR $content',
-        );
+    var itemStart = start;
+    for (var i = start; i <= end; i++) {
+      if (i == end || content.codeUnitAt(i) == 0x2C /* ',' */ ) {
+        final value = _tryParseIntSlice(content, itemStart, i);
+        if (value == null ||
+            value < allowedMin ||
+            value > allowedMax ||
+            value == disallowedValue) {
+          throw FormatException(
+            'Invalid $fieldName: part ${content.substring(itemStart, i)} '
+            'invalid in RECUR $content',
+          );
+        }
+        result.add(value);
+        itemStart = i + 1;
       }
-      result.add(value);
     }
     if (result.isEmpty) {
       throw FormatException('Invalid $fieldName: empty in RECUR $content');
     }
-
     return result;
   }
 
-  static List<int>? _parseBySecond(String content) =>
-      _parseIntList(content, 'BYSECOND', 0, 60);
-
-  static List<int>? _parseByMinute(String content) =>
-      _parseIntList(content, 'BYMINUTE', 0, 59);
-  static List<int>? _parseByHour(String content) =>
-      _parseIntList(content, 'BYHOUR', 0, 23);
-
-  static final _weekdaysByName = {
-    'MO': DateTime.monday,
-    'TU': DateTime.tuesday,
-    'WE': DateTime.wednesday,
-    'TH': DateTime.thursday,
-    'FR': DateTime.friday,
-    'SA': DateTime.saturday,
-    'SU': DateTime.sunday,
-  };
-
-  static List<ByDayRule>? _parseByWeekDay(String content) {
-    final texts = _parseStringList(content, 'BYDAY');
-    if (texts == null) {
-      return null;
-    }
+  static List<ByDayRule> _parseByWeekDaySlice(
+    String content,
+    int start,
+    int end,
+  ) {
     final result = <ByDayRule>[];
-    for (final text in texts) {
-      final weekday = _weekdaysByName[text];
-      if (weekday != null) {
-        result.add(ByDayRule(weekday));
-      } else {
-        // this is a more complex value with a week definition at the beginning:
-        // Definition:
-        // weekdaynum  = [[plus / minus] ordwk] weekday
-        // plus        = "+"
-        // minus       = "-"
-        // ordwk       = 1*2DIGIT       ;1 to 53
-        // weekday     = "SU" / "MO" / "TU" / "WE" / "TH" / "FR" / "SA"
-        final weekText = text.substring(0, text.length - 2);
-        final week = int.tryParse(weekText);
-        if (week == null || week == 0 || week > 53 || week < -53) {
+    var itemStart = start;
+    for (var i = start; i <= end; i++) {
+      if (i == end || content.codeUnitAt(i) == 0x2C /* ',' */ ) {
+        final itemLen = i - itemStart;
+        if (itemLen < 2) {
           throw FormatException(
-            'Invalid week "$weekText" in BYDAY rule part "$text" '
-            'in RECUR "$content"',
+            'Invalid weekday in BYDAY rule part '
+            '${content.substring(itemStart, i)} in RECUR $content',
           );
         }
-        final dayText = text.substring(text.length - 2);
-        final day = _weekdaysByName[dayText];
-        if (day == null) {
-          throw FormatException(
-            'Invalid weekday $dayText in BYDAY rule part $text '
-            'in RECUR $content',
-          );
+        final day = _weekdayFromCodeUnits(
+          content.codeUnitAt(i - 2),
+          content.codeUnitAt(i - 1),
+        );
+        if (itemLen == 2) {
+          if (day == null) {
+            throw FormatException(
+              'Invalid weekday ${content.substring(itemStart, i)} '
+              'in BYDAY rule part in RECUR $content',
+            );
+          }
+          result.add(_constByDayRules[day - 1]);
+        } else {
+          final week = _tryParseIntSlice(content, itemStart, i - 2);
+          if (week == null || week == 0 || week > 53 || week < -53) {
+            final weekText = content.substring(itemStart, i - 2);
+            final text = content.substring(itemStart, i);
+            throw FormatException(
+              'Invalid week "$weekText" in BYDAY rule part "$text" '
+              'in RECUR "$content"',
+            );
+          }
+          if (day == null) {
+            final dayText = content.substring(i - 2, i);
+            final text = content.substring(itemStart, i);
+            throw FormatException(
+              'Invalid weekday $dayText in BYDAY rule part $text '
+              'in RECUR $content',
+            );
+          }
+          result.add(ByDayRule(day, week: week));
         }
-        result.add(ByDayRule(day, week: week));
+        itemStart = i + 1;
       }
     }
-
     return result;
   }
 
-  static List<int>? _parseByMonthDay(String content) =>
-      _parseIntList(content, 'BYMONTHDAY', -31, 31, 0);
-
-  static List<int>? _parseByYearDay(String content) =>
-      _parseIntList(content, 'BYYEARDAY', -366, 366, 0);
-
-  static List<int>? _parseByWeek(String content) =>
-      _parseIntList(content, 'BYWEEKNO', -53, 53, 0);
-
-  static List<int>? _parseByMonth(String content) =>
-      _parseIntList(content, 'BYMONTH', 1, 12);
-
-  static List<int>? _parseBySetPos(String content) =>
-      _parseIntList(content, 'BYSETPOS', -366, 366, 0);
-
-  static int? _parseWorkWeekStart(String content) {
-    final startOfWorkWeekText = _split(content)['WKST'];
-    if (startOfWorkWeekText == null) {
-      return null;
+  static RecurrenceFrequency _parseFrequencySlice(
+    String content,
+    int start,
+    int end,
+  ) {
+    final len = end - start;
+    if (len >= 5) {
+      switch (content.codeUnitAt(start)) {
+        case 0x44: // 'D' -> DAILY
+          if (len == 5 &&
+              content.codeUnitAt(start + 1) == 0x41 &&
+              content.codeUnitAt(start + 2) == 0x49 &&
+              content.codeUnitAt(start + 3) == 0x4C &&
+              content.codeUnitAt(start + 4) == 0x59) {
+            return RecurrenceFrequency.daily;
+          }
+          break;
+        case 0x57: // 'W' -> WEEKLY
+          if (len == 6 &&
+              content.codeUnitAt(start + 1) == 0x45 &&
+              content.codeUnitAt(start + 2) == 0x45 &&
+              content.codeUnitAt(start + 3) == 0x4B &&
+              content.codeUnitAt(start + 4) == 0x4C &&
+              content.codeUnitAt(start + 5) == 0x59) {
+            return RecurrenceFrequency.weekly;
+          }
+          break;
+        case 0x4D: // 'M' -> MONTHLY or MINUTELY
+          if (len == 7 &&
+              content.codeUnitAt(start + 1) == 0x4F &&
+              content.codeUnitAt(start + 2) == 0x4E &&
+              content.codeUnitAt(start + 3) == 0x54 &&
+              content.codeUnitAt(start + 4) == 0x48 &&
+              content.codeUnitAt(start + 5) == 0x4C &&
+              content.codeUnitAt(start + 6) == 0x59) {
+            return RecurrenceFrequency.monthly;
+          }
+          if (len == 8 &&
+              content.codeUnitAt(start + 1) == 0x49 &&
+              content.codeUnitAt(start + 2) == 0x4E &&
+              content.codeUnitAt(start + 3) == 0x55 &&
+              content.codeUnitAt(start + 4) == 0x54 &&
+              content.codeUnitAt(start + 5) == 0x45 &&
+              content.codeUnitAt(start + 6) == 0x4C &&
+              content.codeUnitAt(start + 7) == 0x59) {
+            return RecurrenceFrequency.minutely;
+          }
+          break;
+        case 0x59: // 'Y' -> YEARLY
+          if (len == 6 &&
+              content.codeUnitAt(start + 1) == 0x45 &&
+              content.codeUnitAt(start + 2) == 0x41 &&
+              content.codeUnitAt(start + 3) == 0x52 &&
+              content.codeUnitAt(start + 4) == 0x4C &&
+              content.codeUnitAt(start + 5) == 0x59) {
+            return RecurrenceFrequency.yearly;
+          }
+          break;
+        case 0x48: // 'H' -> HOURLY
+          if (len == 6 &&
+              content.codeUnitAt(start + 1) == 0x4F &&
+              content.codeUnitAt(start + 2) == 0x55 &&
+              content.codeUnitAt(start + 3) == 0x52 &&
+              content.codeUnitAt(start + 4) == 0x4C &&
+              content.codeUnitAt(start + 5) == 0x59) {
+            return RecurrenceFrequency.hourly;
+          }
+          break;
+        case 0x53: // 'S' -> SECONDLY
+          if (len == 8 &&
+              content.codeUnitAt(start + 1) == 0x45 &&
+              content.codeUnitAt(start + 2) == 0x43 &&
+              content.codeUnitAt(start + 3) == 0x4F &&
+              content.codeUnitAt(start + 4) == 0x4E &&
+              content.codeUnitAt(start + 5) == 0x44 &&
+              content.codeUnitAt(start + 6) == 0x4C &&
+              content.codeUnitAt(start + 7) == 0x59) {
+            return RecurrenceFrequency.secondly;
+          }
+          break;
+      }
     }
-    final weekday = _weekdaysByName[startOfWorkWeekText];
-    if (weekday == null) {
-      throw FormatException(
-        'Invalid weekday $startOfWorkWeekText in WKST part '
-        'of RECUR $content',
-      );
-    }
-
-    return weekday;
+    throw FormatException(
+      'Invalid FREQ value: ${content.substring(start, end)} in RECUR $content',
+    );
   }
 
   /// Parses the [Recurrence] role from the given [content].
   // ignore: prefer_constructors_over_static_methods
   static Recurrence parse(String content) {
-    final frequency = _parseFrequency(content);
-    final until = _parseUntil(content);
-    final count = _parseCount(content);
-    final interval = _parseInterval(content);
-    final bySecond = _parseBySecond(content);
-    final byMinute = _parseByMinute(content);
-    final byHour = _parseByHour(content);
-    final byWeekDay = _parseByWeekDay(content);
-    final byMonthDay = _parseByMonthDay(content);
-    final byYearDay = _parseByYearDay(content);
-    final byWeek = _parseByWeek(content);
-    final byMonth = _parseByMonth(content);
-    final bySetPos = _parseBySetPos(content);
-    final startOfWorkWeek = _parseWorkWeekStart(content);
+    RecurrenceFrequency? frequency;
+    DateTime? until;
+    int? count;
+    int? interval;
+    List<int>? bySecond;
+    List<int>? byMinute;
+    List<int>? byHour;
+    List<ByDayRule>? byWeekDay;
+    List<int>? byMonthDay;
+    List<int>? byYearDay;
+    List<int>? byWeek;
+    List<int>? byMonth;
+    List<int>? bySetPos;
+    int? startOfWorkWeek;
+
+    final len = content.length;
+    var segStart = 0;
+    while (segStart < len) {
+      var eqIndex = -1;
+      var segEnd = len;
+      for (var i = segStart; i < len; i++) {
+        final c = content.codeUnitAt(i);
+        if (c == 0x3D /* '=' */ && eqIndex == -1) {
+          eqIndex = i;
+        } else if (c == 0x3B /* ';' */ ) {
+          segEnd = i;
+          break;
+        }
+      }
+      if (eqIndex != -1) {
+        final keyLen = eqIndex - segStart;
+        final valStart = eqIndex + 1;
+        final c0 = content.codeUnitAt(segStart);
+        switch (keyLen) {
+          case 4:
+            if (c0 == 0x46 /* 'F' */ ) {
+              // FREQ
+              frequency = _parseFrequencySlice(content, valStart, segEnd);
+            } else if (c0 == 0x57 /* 'W' */ ) {
+              // WKST
+              if (segEnd - valStart != 2) {
+                throw FormatException(
+                  'Invalid weekday ${content.substring(valStart, segEnd)} '
+                  'in WKST part of RECUR $content',
+                );
+              }
+              final wkst = _weekdayFromCodeUnits(
+                content.codeUnitAt(valStart),
+                content.codeUnitAt(valStart + 1),
+              );
+              if (wkst == null) {
+                throw FormatException(
+                  'Invalid weekday ${content.substring(valStart, segEnd)} '
+                  'in WKST part of RECUR $content',
+                );
+              }
+              startOfWorkWeek = wkst;
+            }
+            break;
+          case 5:
+            if (c0 == 0x55 /* 'U' */ ) {
+              // UNTIL
+              if (segEnd - valStart > 8 &&
+                  content.codeUnitAt(valStart + 8) == 0x54 /* 'T' */ ) {
+                until = DateHelper._parseDateTimeSlice(
+                  content,
+                  valStart,
+                  segEnd,
+                );
+              } else {
+                until = DateHelper._parseDateSlice(content, valStart, segEnd);
+              }
+            } else if (c0 == 0x43 /* 'C' */ ) {
+              // COUNT
+              count = _parseIntSlice(content, valStart, segEnd, 'COUNT');
+            } else if (c0 == 0x42 /* 'B' */ ) {
+              // BYDAY
+              byWeekDay = _parseByWeekDaySlice(content, valStart, segEnd);
+            }
+            break;
+          case 6:
+            // BYHOUR
+            byHour = _parseIntListSlice(
+              content,
+              valStart,
+              segEnd,
+              'BYHOUR',
+              0,
+              23,
+            );
+            break;
+          case 7:
+            // BYMONTH
+            byMonth = _parseIntListSlice(
+              content,
+              valStart,
+              segEnd,
+              'BYMONTH',
+              1,
+              12,
+            );
+            break;
+          case 8:
+            if (c0 == 0x49 /* 'I' */ ) {
+              // INTERVAL
+              interval = _parseIntSlice(content, valStart, segEnd, 'INTERVAL');
+            } else {
+              final c2 = content.codeUnitAt(segStart + 2);
+              if (c2 == 0x4D /* 'M' */ ) {
+                // BYMINUTE
+                byMinute = _parseIntListSlice(
+                  content,
+                  valStart,
+                  segEnd,
+                  'BYMINUTE',
+                  0,
+                  59,
+                );
+              } else if (c2 == 0x57 /* 'W' */ ) {
+                // BYWEEKNO
+                byWeek = _parseIntListSlice(
+                  content,
+                  valStart,
+                  segEnd,
+                  'BYWEEKNO',
+                  -53,
+                  53,
+                  0,
+                );
+              } else if (content.codeUnitAt(segStart + 4) == 0x54 /* 'T' */ ) {
+                // BYSETPOS
+                bySetPos = _parseIntListSlice(
+                  content,
+                  valStart,
+                  segEnd,
+                  'BYSETPOS',
+                  -366,
+                  366,
+                  0,
+                );
+              } else {
+                // BYSECOND
+                bySecond = _parseIntListSlice(
+                  content,
+                  valStart,
+                  segEnd,
+                  'BYSECOND',
+                  0,
+                  60,
+                );
+              }
+            }
+            break;
+          case 9:
+            // BYYEARDAY
+            byYearDay = _parseIntListSlice(
+              content,
+              valStart,
+              segEnd,
+              'BYYEARDAY',
+              -366,
+              366,
+              0,
+            );
+            break;
+          case 10:
+            // BYMONTHDAY
+            byMonthDay = _parseIntListSlice(
+              content,
+              valStart,
+              segEnd,
+              'BYMONTHDAY',
+              -31,
+              31,
+              0,
+            );
+            break;
+        }
+      }
+      segStart = segEnd + 1;
+    }
+
+    if (frequency == null) {
+      throw FormatException('No FREQ found in RECUR $content');
+    }
 
     return Recurrence(
       frequency,
@@ -1247,10 +1472,13 @@ class TimeOfDayWithSeconds {
   /// Parses a `HHMMSS` time definition from the given [content].
   // ignore: prefer_constructors_over_static_methods
   static TimeOfDayWithSeconds parse(String content) {
-    final hour = int.tryParse(content.substring(0, 2));
-    final minute = int.tryParse(content.substring(2, 4));
-    final second = int.tryParse(content.substring(4, 6));
-    if (hour == null || minute == null || second == null) {
+    if (content.length < 6) {
+      throw FormatException('Invalid time definition: $content');
+    }
+    final hour = DateHelper._parse2Digits(content, 0);
+    final minute = DateHelper._parse2Digits(content, 2);
+    final second = DateHelper._parse2Digits(content, 4);
+    if (hour < 0 || minute < 0 || second < 0) {
       throw FormatException('Invalid time definition: $content');
     }
     return TimeOfDayWithSeconds(hour: hour, minute: minute, second: second);
@@ -1322,6 +1550,11 @@ class UtcOffset {
     if (content.length < 5) {
       throw FormatException('Invalid UTC-OFFSET $content');
     }
+    final sign = content.codeUnitAt(0);
+    final absHour = DateHelper._parse2Digits(content, 1);
+    if (absHour >= 0 && (sign == 0x2B /* '+' */ || sign == 0x2D /* '-' */ )) {
+      return sign == 0x2D ? -absHour : absHour;
+    }
     final hourText = content.substring(0, 3);
     final hour = int.tryParse(hourText);
     if (hour == null) {
@@ -1334,11 +1567,8 @@ class UtcOffset {
     if (content.length < 5) {
       throw FormatException('Invalid UTC-OFFSET $content');
     }
-    final minuteText = content.length > 5
-        ? content.substring(3, 5)
-        : content.substring(3);
-    final minute = int.tryParse(minuteText);
-    if (minute == null) {
+    final minute = DateHelper._parse2Digits(content, 3);
+    if (minute < 0) {
       throw FormatException('Invalid UTC-OFFSET $content');
     }
     return minute;
@@ -1349,48 +1579,89 @@ class UtcOffset {
 class DateHelper {
   DateHelper._();
 
-  /// Parses a date of format `YYYYMMDD` from the given [content].
-  static DateTime parseDate(String content) {
-    if (content.length != 4 + 2 + 2) {
-      throw FormatException('Invalid date definition: $content');
+  static int _parse2Digits(String content, int start) {
+    final d0 = content.codeUnitAt(start) ^ 0x30;
+    final d1 = content.codeUnitAt(start + 1) ^ 0x30;
+    if (d0 > 9 || d1 > 9) {
+      return -1;
     }
-    final year = int.tryParse(content.substring(0, 4));
-    final month = int.tryParse(content.substring(4, 6));
-    final day = int.tryParse(content.substring(6));
-    if (year == null || month == null || day == null) {
-      throw FormatException('Invalid date definition: $content');
+    return d0 * 10 + d1;
+  }
+
+  static int _parse4Digits(String content, int start) {
+    final d0 = content.codeUnitAt(start) ^ 0x30;
+    final d1 = content.codeUnitAt(start + 1) ^ 0x30;
+    final d2 = content.codeUnitAt(start + 2) ^ 0x30;
+    final d3 = content.codeUnitAt(start + 3) ^ 0x30;
+    if (d0 > 9 || d1 > 9 || d2 > 9 || d3 > 9) {
+      return -1;
+    }
+    return d0 * 1000 + d1 * 100 + d2 * 10 + d3;
+  }
+
+  static DateTime _parseDateSlice(String content, int start, int end) {
+    if (end - start != 8) {
+      throw FormatException(
+        'Invalid date definition: ${content.substring(start, end)}',
+      );
+    }
+    final year = _parse4Digits(content, start);
+    final month = _parse2Digits(content, start + 4);
+    final day = _parse2Digits(content, start + 6);
+    if (year < 0 || month < 0 || day < 0) {
+      throw FormatException(
+        'Invalid date definition: ${content.substring(start, end)}',
+      );
     }
     return DateTime(year, month, day);
   }
 
+  static DateTime _parseDateTimeSlice(String content, int start, int end) {
+    if (end - start < 15 || content.codeUnitAt(start + 8) != 0x54 /* 'T' */ ) {
+      throw FormatException(
+        'Invalid datetime definition: ${content.substring(start, end)}',
+      );
+    }
+    final year = _parse4Digits(content, start);
+    final month = _parse2Digits(content, start + 4);
+    final day = _parse2Digits(content, start + 6);
+    final hour = _parse2Digits(content, start + 9);
+    final minute = _parse2Digits(content, start + 11);
+    final second = _parse2Digits(content, start + 13);
+    if (year < 0 ||
+        month < 0 ||
+        day < 0 ||
+        hour < 0 ||
+        minute < 0 ||
+        second < 0) {
+      throw FormatException(
+        'Invalid datetime definition: ${content.substring(start, end)}',
+      );
+    }
+    final isUtc = content.codeUnitAt(end - 1) == 0x5A; /* 'Z' */
+    if (isUtc) {
+      return DateTime.utc(year, month, day, hour, minute, second);
+    }
+    return DateTime(year, month, day, hour, minute, second);
+  }
+
+  static String? _lastDateTimeInput;
+  static DateTime? _lastDateTimeValue;
+
+  /// Parses a date of format `YYYYMMDD` from the given [content].
+  static DateTime parseDate(String content) =>
+      _parseDateSlice(content, 0, content.length);
+
   /// Parses a date-time of format `YYYYMMDDTHHMMSS[Z]` from the given
   /// [content].
   static DateTime parseDateTime(String content) {
-    final tIndex = content.indexOf('T');
-    if (content.length < 4 + 2 + 2 + 1 + 6 || tIndex != 4 + 2 + 2) {
-      throw FormatException('Invalid datetime definition: $content');
+    if (content == _lastDateTimeInput) {
+      return _lastDateTimeValue!;
     }
-    final date = DateHelper.parseDate(content.substring(0, 4 + 2 + 2));
-    final time = TimeOfDayWithSeconds.parse(content.substring(tIndex + 1));
-    final isUtc = content.endsWith('Z');
-    if (isUtc) {
-      return DateTime.utc(
-        date.year,
-        date.month,
-        date.day,
-        time.hour,
-        time.minute,
-        time.second,
-      );
-    }
-    return DateTime(
-      date.year,
-      date.month,
-      date.day,
-      time.hour,
-      time.minute,
-      time.second,
-    );
+    final parsed = _parseDateTimeSlice(content, 0, content.length);
+    _lastDateTimeInput = content;
+    _lastDateTimeValue = parsed;
+    return parsed;
   }
 
   /// Renders the date part of the given [value] as `YYYYMMDD` into the
@@ -1493,10 +1764,7 @@ class Period {
       );
 
   /// Parses a period from the given [content].
-  Period.text(String content)
-    : startDate = _parseStartDate(content),
-      endDate = _parseEndDate(content),
-      duration = _parseDuration(content);
+  factory Period.text(String content) => parse(content);
 
   /// The startdate
   final DateTime startDate;
@@ -1521,46 +1789,31 @@ class Period {
     return separatorIndex;
   }
 
-  static DateTime _parseStartDate(String content) {
-    final separatorIndex = _getSeparatorIndex(content);
-    final startDateText = content.substring(0, separatorIndex);
-    return DateHelper.parseDateTime(startDateText);
-  }
-
-  static DateTime? _parseEndDate(String content) {
-    final separatorIndex = _getSeparatorIndex(content);
-    final endText = content.substring(separatorIndex + 1);
-    if (endText.startsWith('P')) {
-      return null;
-    }
-    return DateHelper.parseDateTime(endText);
-  }
-
-  static IsoDuration? _parseDuration(String content) {
-    final separatorIndex = _getSeparatorIndex(content);
-    final endText = content.substring(separatorIndex + 1);
-    if (!endText.startsWith('P')) {
-      return null;
-    }
-
-    return IsoDuration.parse(endText);
-  }
-
   /// Parses a period from the given [textValue].
   // ignore: prefer_constructors_over_static_methods
   static Period parse(String textValue) {
-    final startDate = _parseStartDate(textValue);
-    final duration = _parseDuration(textValue);
-    final endDate = _parseEndDate(textValue);
-
-    return Period(startDate, duration: duration, endDate: endDate);
+    final separatorIndex = _getSeparatorIndex(textValue);
+    final startDate = DateHelper._parseDateTimeSlice(
+      textValue,
+      0,
+      separatorIndex,
+    );
+    final endStart = separatorIndex + 1;
+    final len = textValue.length;
+    if (endStart < len &&
+        (textValue.codeUnitAt(endStart) == 0x50 /* 'P' */ ||
+            textValue.codeUnitAt(endStart) == 0x2D /* '-' */ ||
+            textValue.codeUnitAt(endStart) == 0x2B /* '+' */ )) {
+      return Period(
+        startDate,
+        duration: IsoDuration._parseSlice(textValue, endStart, len),
+      );
+    }
+    return Period(
+      startDate,
+      endDate: DateHelper._parseDateTimeSlice(textValue, endStart, len),
+    );
   }
-}
-
-class _DurationSection {
-  _DurationSection(this.result, this.index);
-  final int result;
-  final int index;
 }
 
 /// ISO 8601 compliant duration
@@ -1600,28 +1853,6 @@ class IsoDuration {
 
   /// Whether this is a negative duration.
   final bool isNegativeDuration;
-
-  static _DurationSection _parseSection(
-    String content,
-    int startIndex,
-    String designatur, {
-    int maxIndex = -1,
-  }) {
-    final index = content.indexOf(designatur, startIndex);
-    if (index == -1 || (maxIndex != -1 && index > maxIndex)) {
-      return _DurationSection(0, startIndex);
-    }
-    var text = content.substring(startIndex, index);
-    if (text.contains(',')) {
-      text = text.replaceAll(',', '.');
-    }
-    final parsed = int.tryParse(text);
-    if (parsed == null) {
-      throw FormatException('Invalid duration: $content (for part [$text])');
-    }
-
-    return _DurationSection(parsed, index + 1);
-  }
 
   @override
   int get hashCode =>
@@ -1727,58 +1958,75 @@ class IsoDuration {
     return intermediate.add(duration);
   }
 
-  /// Parses the given [textValue] into a duration.
-  ///
-  /// The formmat is defined as `P[n]Y[n]M[n]DT[n]H[n]M[n]S`
-  /// Example: `P3WT1H` means 3 weeks and 1 hour.
-  /// Compare https://en.wikipedia.org/wiki/ISO_8601#Durations
   // ignore: prefer_constructors_over_static_methods
-  static IsoDuration parse(String textValue) {
-    /// Note ISO_8601 allows floating numbers, compare
-    /// https://en.wikipedia.org/wiki/ISO_8601#Durations,
-    /// but even the validator https://icalendar.org/validator.html does
-    /// not accept floating numbers.
-    ///  So this implementation expects integers, too
-    if (!(textValue.startsWith('P') || textValue.startsWith('-P'))) {
+  static IsoDuration _parseSlice(String textValue, int start, int end) {
+    if (end - start < 2) {
       throw FormatException(
         'duration content needs to start with P, $textValue is invalid',
       );
     }
-    final isNegativeDuration = textValue.startsWith('-');
-    final content = isNegativeDuration ? textValue.substring(1) : textValue;
-    var years = 0, months = 0, weeks = 0, days = 0;
-    var startIndex = 1;
-    if (!content.startsWith('PT')) {
-      final timeIndex = content.indexOf('T');
-      final yearsResult = _parseSection(content, startIndex, 'Y');
-      startIndex = yearsResult.index;
-      years = yearsResult.result;
-      final monthsResult = _parseSection(
-        content,
-        startIndex,
-        'M',
-        maxIndex: timeIndex,
-      ); // M can also stand for minutes after the T
-      startIndex = monthsResult.index;
-      months = monthsResult.result;
-      final weeksResult = _parseSection(content, startIndex, 'W');
-      startIndex = weeksResult.index;
-      weeks = weeksResult.result;
-      final daysResult = _parseSection(content, startIndex, 'D');
-      startIndex = daysResult.index;
-      days = daysResult.result;
+    var i = start;
+    var isNegativeDuration = false;
+    final first = textValue.codeUnitAt(i);
+    if (first == 0x2D /* '-' */ ) {
+      isNegativeDuration = true;
+      i++;
+    } else if (first == 0x2B /* '+' */ ) {
+      i++;
     }
+    if (i >= end || textValue.codeUnitAt(i) != 0x50 /* 'P' */ ) {
+      throw FormatException(
+        'duration content needs to start with P, $textValue is invalid',
+      );
+    }
+    i++; // skip 'P'
+    var years = 0, months = 0, weeks = 0, days = 0;
     var hours = 0, minutes = 0, seconds = 0;
-    if (startIndex < content.length && content[startIndex] == 'T') {
-      startIndex++;
-      final hoursResult = _parseSection(content, startIndex, 'H');
-      hours = hoursResult.result;
-      startIndex = hoursResult.index;
-      final minutesResult = _parseSection(content, startIndex, 'M');
-      minutes = minutesResult.result;
-      startIndex = minutesResult.index;
-      final secondsResult = _parseSection(content, startIndex, 'S');
-      seconds = secondsResult.result;
+    var isTime = false;
+    var currentVal = 0;
+    var hasDigits = false;
+
+    for (; i < end; i++) {
+      final c = textValue.codeUnitAt(i);
+      final digit = c ^ 0x30;
+      if (digit <= 9) {
+        currentVal = currentVal * 10 + digit;
+        hasDigits = true;
+      } else if (c == 0x54 /* 'T' */ ) {
+        if (hasDigits) {
+          throw FormatException('Invalid duration: $textValue');
+        }
+        isTime = true;
+      } else {
+        if (!hasDigits) {
+          throw FormatException('Invalid duration: $textValue');
+        }
+        if (!isTime) {
+          if (c == 0x59 /* 'Y' */ ) {
+            years = currentVal;
+          } else if (c == 0x4D /* 'M' */ ) {
+            months = currentVal;
+          } else if (c == 0x57 /* 'W' */ ) {
+            weeks = currentVal;
+          } else if (c == 0x44 /* 'D' */ ) {
+            days = currentVal;
+          } else {
+            throw FormatException('Invalid duration: $textValue');
+          }
+        } else {
+          if (c == 0x48 /* 'H' */ ) {
+            hours = currentVal;
+          } else if (c == 0x4D /* 'M' */ ) {
+            minutes = currentVal;
+          } else if (c == 0x53 /* 'S' */ ) {
+            seconds = currentVal;
+          } else {
+            throw FormatException('Invalid duration: $textValue');
+          }
+        }
+        currentVal = 0;
+        hasDigits = false;
+      }
     }
 
     return IsoDuration(
@@ -1791,6 +2039,32 @@ class IsoDuration {
       seconds: seconds,
       isNegativeDuration: isNegativeDuration,
     );
+  }
+
+  static String? _lastInput1;
+  static IsoDuration? _lastDuration1;
+  static String? _lastInput2;
+  static IsoDuration? _lastDuration2;
+
+  /// Parses the given [textValue] into a duration.
+  ///
+  /// The formmat is defined as `P[n]Y[n]M[n]DT[n]H[n]M[n]S`
+  /// Example: `P3WT1H` means 3 weeks and 1 hour.
+  /// Compare https://en.wikipedia.org/wiki/ISO_8601#Durations
+  // ignore: prefer_constructors_over_static_methods
+  static IsoDuration parse(String textValue) {
+    if (textValue == _lastInput1) {
+      return _lastDuration1!;
+    }
+    if (textValue == _lastInput2) {
+      return _lastDuration2!;
+    }
+    final parsed = _parseSlice(textValue, 0, textValue.length);
+    _lastInput2 = _lastInput1;
+    _lastDuration2 = _lastDuration1;
+    _lastInput1 = textValue;
+    _lastDuration1 = parsed;
+    return parsed;
   }
 }
 

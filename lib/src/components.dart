@@ -78,12 +78,10 @@ abstract class VComponent {
       case VAlarm.componentName:
         return VComponentType.alarm;
       case VFreeBusy.componentName:
-        return VComponentType.freeBusy;
+        return VFreeBusy.componentName == name
+            ? VComponentType.freeBusy
+            : VComponentType.other;
     }
-    print(
-      'Warning: Component not registered: $name '
-      '(in Component._getComponentType)',
-    );
 
     return VComponentType.other;
   }
@@ -128,8 +126,16 @@ abstract class VComponent {
   /// Retrieves the property with the [propertyName]
   ///
   /// Optionally specify the type [T] for not needing to cast yourself
-  T? getProperty<T extends Property>(final String propertyName) =>
-      properties.firstWhereOrNull((prop) => prop.name == propertyName) as T?;
+  T? getProperty<T extends Property>(final String propertyName) {
+    final props = properties;
+    for (var i = 0; i < props.length; i++) {
+      final prop = props[i];
+      if (prop.name == propertyName) {
+        return prop as T?;
+      }
+    }
+    return null;
+  }
 
   /// Retrieves all matching properties with the name [propertyName].
   ///
@@ -153,8 +159,16 @@ abstract class VComponent {
   }
 
   /// Retrieves the first property with the name [propertyName]
-  Property? operator [](final String propertyName) =>
-      properties.firstWhereOrNull((prop) => prop.name == propertyName);
+  Property? operator [](final String propertyName) {
+    final props = properties;
+    for (var i = 0; i < props.length; i++) {
+      final prop = props[i];
+      if (prop.name == propertyName) {
+        return prop;
+      }
+    }
+    return null;
+  }
 
   /// Sets the property [property], replacing other properties with the given
   /// [propertyName] first.
@@ -242,36 +256,39 @@ abstract class VComponent {
   }) {
     final root = _createComponent(lines.first);
     var current = root;
-    for (var i = 1; i < lines.length; i++) {
+    final len = lines.length;
+    for (var i = 1; i < len; i++) {
       final line = lines[i];
-      try {
-        if (line.startsWith('BEGIN:')) {
-          final child = _createComponent(line, parent: current);
-          current.children.add(child);
-          current = child;
-        } else if (line.startsWith('END:')) {
-          final expected = 'END:${current.name}';
-          if (line != expected) {
-            throw FormatException('Received [$line] but expected [$expected]');
-          }
-          current.checkValidity();
-          final parent = current.parent;
-          if (parent != null) {
-            current = parent;
-          }
-        } else {
-          if (line.trim().isEmpty) {
-            continue;
-          }
-          final property = Property.parseProperty(
-            line,
-            customParser: customParser,
+      if (line.isEmpty) {
+        continue;
+      }
+      final firstChar = line.codeUnitAt(0);
+      if (firstChar == 0x42 /* 'B' */ && line.startsWith('BEGIN:')) {
+        final child = _createComponent(line, parent: current);
+        current.children.add(child);
+        current = child;
+      } else if (firstChar == 0x45 /* 'E' */ && line.startsWith('END:')) {
+        final currentName = current.name;
+        if (line.length != currentName.length + 4 ||
+            !line.endsWith(currentName)) {
+          throw FormatException(
+            'Received [$line] but expected [END:$currentName]',
           );
-          current.properties.add(property);
         }
-      } on FormatException catch (_) {
-        print('Error parsing line $i: "$line"');
-        rethrow;
+        current.checkValidity();
+        final parent = current.parent;
+        if (parent != null) {
+          current = parent;
+        }
+      } else {
+        if (firstChar <= Rune.runeSpace && line.trim().isEmpty) {
+          continue;
+        }
+        final property = Property.parseProperty(
+          line,
+          customParser: customParser,
+        );
+        current.properties.add(property);
       }
     }
 
@@ -324,67 +341,249 @@ abstract class VComponent {
 
   /// Unfolds the given [input] text, usually with lines separated by `\r\n`
   static List<String> unfold(String input) {
-    _UnfoldData getUnfoldData(String input) {
-      final firstStandardLineBreak = input.indexOf('\r\n');
-      final firstUnixLineBreak = input.indexOf('\n');
-
-      if (firstStandardLineBreak != -1 &&
-          (firstUnixLineBreak == -1 ||
-              firstStandardLineBreak < firstUnixLineBreak)) {
-        return _UnfoldData(input, hasStandardLineBreaks: true);
-      }
-
-      if (firstStandardLineBreak != -1 && firstUnixLineBreak != -1) {
-        return _UnfoldData(
-          input.replaceAll('\r\n', '\n'),
-          hasStandardLineBreaks: false,
-        );
-      }
-
-      return _UnfoldData(input, hasStandardLineBreaks: false);
+    final firstLf = input.indexOf('\n');
+    if (firstLf == -1) {
+      return input.isEmpty ? <String>[] : <String>[input];
     }
+    if (firstLf > 0 &&
+        input.codeUnitAt(firstLf - 1) == Rune.runeCarriageReturn) {
+      return _unfoldStandardString(input, firstLf - 1);
+    }
+    return _unfoldNonStandardString(input);
+  }
 
-    final data = getUnfoldData(input);
-    if (data.hasStandardLineBreaks) {
-      return unfoldStandardCompliantLines(data.input.split('\r\n'));
+  static List<String> _unfoldStandardString(String input, int firstCrLf) {
+    final output = <String>[];
+    final len = input.length;
+    StringBuffer? buffer;
+    var lineStart = 0;
+    var crlfIndex = firstCrLf;
+
+    while (true) {
+      final lineEnd = crlfIndex != -1 ? crlfIndex : len;
+      final hasNext = crlfIndex != -1;
+      final nextLineStart = hasNext ? crlfIndex + 2 : len;
+      final nextStartsWithWs =
+          nextLineStart < len &&
+          _isSpaceOrTab(input.codeUnitAt(nextLineStart));
+
+      if (buffer != null) {
+        final currentStartsWithWs =
+            lineStart < lineEnd && _isSpaceOrTab(input.codeUnitAt(lineStart));
+        if (currentStartsWithWs) {
+          var trimmedStart = lineStart + 1;
+          while (trimmedStart < lineEnd &&
+              _isSpaceOrTab(input.codeUnitAt(trimmedStart))) {
+            trimmedStart++;
+          }
+          if (trimmedStart < lineEnd) {
+            buffer.write(input.substring(trimmedStart, lineEnd));
+          }
+          if (!hasNext) {
+            output.add(buffer.toString());
+            break;
+          }
+          lineStart = nextLineStart;
+          crlfIndex = _findNextCrLf(input, lineStart, len);
+          continue;
+        } else {
+          output.add(buffer.toString());
+          buffer = null;
+        }
+      }
+
+      if (hasNext && nextStartsWithWs) {
+        buffer = StringBuffer();
+        if (lineEnd > lineStart) {
+          buffer.write(input.substring(lineStart, lineEnd));
+        }
+      } else if (lineEnd > lineStart) {
+        output.add(input.substring(lineStart, lineEnd));
+      }
+
+      if (!hasNext) {
+        break;
+      }
+      lineStart = nextLineStart;
+      crlfIndex = _findNextCrLf(input, lineStart, len);
+    }
+    return output;
+  }
+
+  static int _findNextCrLf(String input, int start, int len) {
+    final end = len - 1;
+    for (var j = start; j < end; j++) {
+      if (input.codeUnitAt(j) == Rune.runeCarriageReturn &&
+          input.codeUnitAt(j + 1) == Rune.runeLineFeed) {
+        return j;
+      }
+    }
+    return -1;
+  }
+
+  static int _findNextLf(String input, int start, int len) {
+    for (var j = start; j < len; j++) {
+      if (input.codeUnitAt(j) == Rune.runeLineFeed) {
+        return j;
+      }
+    }
+    return -1;
+  }
+
+  static List<String> _unfoldNonStandardString(String input) {
+    if (!input.contains('"')) {
+      return _unfoldNonStandardNoQuotes(input);
     }
     final output = <String>[];
-    var buffer = StringBuffer();
-    final ascii = data.input.runes.toList();
+    final len = input.length;
+    StringBuffer? buffer;
+    var segmentStart = 0;
     var isInQuote = false;
-    for (var i = 0; i < ascii.length; i++) {
-      final rune = ascii[i];
+
+    for (var i = 0; i < len; i++) {
+      final rune = input.codeUnitAt(i);
       if (rune == Rune.runeLineFeed) {
-        if (i < ascii.length - 1 &&
-            (ascii[i + 1] == Rune.runeSpace || ascii[i + 1] == Rune.runeTab)) {
-          // this line-break must be ignored:
-          i++;
-          while (i < ascii.length - 1 &&
-              (ascii[i + 1] == Rune.runeSpace ||
-                  ascii[i + 1] == Rune.runeTab)) {
+        final segEnd =
+            (i > segmentStart &&
+                input.codeUnitAt(i - 1) == Rune.runeCarriageReturn)
+            ? i - 1
+            : i;
+        if (i + 1 < len) {
+          final next = input.codeUnitAt(i + 1);
+          if (next == Rune.runeSpace || next == Rune.runeTab) {
+            buffer ??= StringBuffer();
+            if (segEnd > segmentStart) {
+              buffer.write(input.substring(segmentStart, segEnd));
+            }
             i++;
+            while (i + 1 < len) {
+              final nc = input.codeUnitAt(i + 1);
+              if (nc != Rune.runeSpace && nc != Rune.runeTab) {
+                break;
+              }
+              i++;
+            }
+            segmentStart = i + 1;
+            continue;
           }
-          continue;
         }
         if (!isInQuote) {
-          // this marks the end of the current line:
-          if (buffer.isNotEmpty) {
-            output.add(buffer.toString());
-            buffer = StringBuffer();
+          if (buffer != null) {
+            if (segEnd > segmentStart) {
+              buffer.write(input.substring(segmentStart, segEnd));
+            }
+            if (buffer.isNotEmpty) {
+              output.add(buffer.toString());
+            }
+            buffer = null;
+          } else if (segEnd > segmentStart) {
+            output.add(input.substring(segmentStart, segEnd));
           }
+          segmentStart = i + 1;
           continue;
+        } else if (segEnd < i) {
+          buffer ??= StringBuffer();
+          if (segEnd > segmentStart) {
+            buffer.write(input.substring(segmentStart, segEnd));
+          }
+          buffer.write('\n');
+          segmentStart = i + 1;
         }
       } else if (rune == Rune.runeDoubleQuote) {
         isInQuote = !isInQuote;
       }
-      buffer.writeCharCode(rune);
     }
-    if (buffer.isNotEmpty) {
-      output.add(buffer.toString());
+
+    var end = len;
+    if (end > segmentStart &&
+        input.codeUnitAt(end - 1) == Rune.runeCarriageReturn) {
+      end--;
+    }
+    if (buffer != null) {
+      if (end > segmentStart) {
+        buffer.write(input.substring(segmentStart, end));
+      }
+      if (buffer.isNotEmpty) {
+        output.add(buffer.toString());
+      }
+    } else if (end > segmentStart) {
+      output.add(input.substring(segmentStart, end));
     }
 
     return output;
   }
+
+  static List<String> _unfoldNonStandardNoQuotes(String input) {
+    final output = <String>[];
+    final len = input.length;
+    StringBuffer? buffer;
+    var segmentStart = 0;
+
+    while (segmentStart < len) {
+      final lfIndex = _findNextLf(input, segmentStart, len);
+      if (lfIndex == -1) {
+        break;
+      }
+      final segEnd =
+          (lfIndex > segmentStart &&
+              input.codeUnitAt(lfIndex - 1) == Rune.runeCarriageReturn)
+          ? lfIndex - 1
+          : lfIndex;
+      var i = lfIndex;
+      if (i + 1 < len) {
+        final next = input.codeUnitAt(i + 1);
+        if (next == Rune.runeSpace || next == Rune.runeTab) {
+          buffer ??= StringBuffer();
+          if (segEnd > segmentStart) {
+            buffer.write(input.substring(segmentStart, segEnd));
+          }
+          i += 2;
+          while (i < len) {
+            final nc = input.codeUnitAt(i);
+            if (nc != Rune.runeSpace && nc != Rune.runeTab) {
+              break;
+            }
+            i++;
+          }
+          segmentStart = i;
+          continue;
+        }
+      }
+      if (buffer != null) {
+        if (segEnd > segmentStart) {
+          buffer.write(input.substring(segmentStart, segEnd));
+        }
+        if (buffer.isNotEmpty) {
+          output.add(buffer.toString());
+        }
+        buffer = null;
+      } else if (segEnd > segmentStart) {
+        output.add(input.substring(segmentStart, segEnd));
+      }
+      segmentStart = lfIndex + 1;
+    }
+
+    var end = len;
+    if (end > segmentStart &&
+        input.codeUnitAt(end - 1) == Rune.runeCarriageReturn) {
+      end--;
+    }
+    if (buffer != null) {
+      if (end > segmentStart) {
+        buffer.write(input.substring(segmentStart, end));
+      }
+      if (buffer.isNotEmpty) {
+        output.add(buffer.toString());
+      }
+    } else if (end > segmentStart) {
+      output.add(input.substring(segmentStart, end));
+    }
+
+    return output;
+  }
+
+  static bool _isSpaceOrTab(int c) =>
+      c == Rune.runeSpace || c == Rune.runeTab;
 
   /// Unfolds the given [input] lines, originally separated by `\r\n`
   static List<String> unfoldStandardCompliantLines(List<String> input) {
@@ -498,7 +697,13 @@ abstract class VComponent {
 /// Extension that adds a helper to detect leading whitespace.
 extension WhiteSpaceDetector on String {
   /// Checks if this string starts with a space or a tab character.
-  bool startsWithWhiteSpace() => startsWith(' ') || startsWith('\t');
+  bool startsWithWhiteSpace() {
+    if (isEmpty) {
+      return false;
+    }
+    final c = codeUnitAt(0);
+    return c == Rune.runeSpace || c == Rune.runeTab;
+  }
 }
 
 /// Contains a `VCALENDAR` component
@@ -2369,11 +2574,4 @@ class VFreeBusy extends _UidMandatoryComponent {
 
   @override
   VComponent instantiate({VComponent? parent}) => VFreeBusy(parent: parent);
-}
-
-class _UnfoldData {
-  _UnfoldData(this.input, {required this.hasStandardLineBreaks});
-
-  final String input;
-  final bool hasStandardLineBreaks;
 }
