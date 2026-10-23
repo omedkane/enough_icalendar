@@ -95,7 +95,7 @@ class RecurrenceRuleToTextEncoder extends Converter<Recurrence, String> {
   }
 
   void _convertDaily(Recurrence input, StringBuffer output) {
-    //TODO: support BYHOUR and BYMINUTE modifier
+    // TODO(enough): support BYHOUR and BYMINUTE modifier
     //  Every 20 minutes from 9:00 AM to 4:40 PM every day:
 
     //    DTSTART;TZID=America/New_York:19970902T090000
@@ -267,7 +267,10 @@ class RecurrenceRuleToTextEncoder extends Converter<Recurrence, String> {
       );
     }
     if (appendByMonthsDirectly) {
-      assert(!appendByWeeksDirectly);
+      assert(
+        !appendByWeeksDirectly,
+        'By-weeks must not be appended directly when appending by-months.',
+      );
       output.add(
         _formatByMonths(input, combination: ListCombination.conjunctiveShort),
       );
@@ -298,14 +301,16 @@ class RecurrenceRuleToTextEncoder extends Converter<Recurrence, String> {
           variant: InOnVariant.also,
           combination: ListCombination.disjunctive,
         ),
-    ].whereNotNull().toList();
+    ].nonNulls.toList();
     if (limits.isNotEmpty) {
       output.add(l10n.list(limits, ListCombination.conjunctiveLong));
     }
   }
 
   String? _formatBySetPositions(Recurrence input) {
-    if (!input.hasBySetPos) return null;
+    if (!input.hasBySetPos) {
+      return null;
+    }
 
     return l10n.onInstances(input.bySetPos!.formattedForUser(l10n));
   }
@@ -315,7 +320,9 @@ class RecurrenceRuleToTextEncoder extends Converter<Recurrence, String> {
     InOnVariant variant = InOnVariant.simple,
     ListCombination combination = ListCombination.conjunctiveShort,
   }) {
-    if (!input.hasByMonth) return null;
+    if (!input.hasByMonth) {
+      return null;
+    }
 
     return l10n.inMonths(
       input.byMonth!.formattedForUser(
@@ -332,7 +339,9 @@ class RecurrenceRuleToTextEncoder extends Converter<Recurrence, String> {
     InOnVariant variant = InOnVariant.simple,
     ListCombination combination = ListCombination.conjunctiveShort,
   }) {
-    if (!input.hasByWeek) return null;
+    if (!input.hasByWeek) {
+      return null;
+    }
 
     return l10n.inWeeks(
       input.byWeek!.formattedForUser(l10n, combination: combination),
@@ -345,7 +354,9 @@ class RecurrenceRuleToTextEncoder extends Converter<Recurrence, String> {
     InOnVariant variant = InOnVariant.simple,
     ListCombination combination = ListCombination.conjunctiveShort,
   }) {
-    if (!input.hasByYearDay) return null;
+    if (!input.hasByYearDay) {
+      return null;
+    }
 
     return l10n.onDaysOfYear(
       input.byYearDay!.formattedForUser(l10n, combination: combination),
@@ -359,7 +370,9 @@ class RecurrenceRuleToTextEncoder extends Converter<Recurrence, String> {
     InOnVariant variant = InOnVariant.simple,
     ListCombination combination = ListCombination.conjunctiveShort,
   }) {
-    if (!input.hasByMonthDay) return null;
+    if (!input.hasByMonthDay) {
+      return null;
+    }
 
     return l10n.onDaysOfMonth(
       input.byMonthDay!.formattedForUser(l10n, combination: combination),
@@ -374,7 +387,9 @@ class RecurrenceRuleToTextEncoder extends Converter<Recurrence, String> {
     bool? indicateFrequency,
     InOnVariant variant = InOnVariant.simple,
   }) {
-    if (!input.hasByWeekDay) return null;
+    if (!input.hasByWeekDay) {
+      return null;
+    }
 
     var addEveryPrefix = frequency != null;
     if (frequency == DaysOfWeekFrequency.yearly &&

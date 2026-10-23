@@ -1086,6 +1086,7 @@ class Recurrence {
   }
 
   /// Parses the [Recurrence] role from the given [content].
+  // ignore: prefer_constructors_over_static_methods
   static Recurrence parse(String content) {
     final frequency = _parseFrequency(content);
     final until = _parseUntil(content);
@@ -1244,6 +1245,7 @@ class TimeOfDayWithSeconds {
   }
 
   /// Parses a `HHMMSS` time definition from the given [content].
+  // ignore: prefer_constructors_over_static_methods
   static TimeOfDayWithSeconds parse(String content) {
     final hour = int.tryParse(content.substring(0, 2));
     final minute = int.tryParse(content.substring(2, 4));
@@ -1456,6 +1458,7 @@ class DateTimeOrDuration {
   }
 
   /// Parses the [textValue] according to the given value [type].
+  // ignore: prefer_constructors_over_static_methods
   static DateTimeOrDuration parse(String textValue, ValueType type) {
     DateTime? dateTime;
     IsoDuration? duration;
@@ -1500,12 +1503,12 @@ class Period {
 
   /// The duration
   ///
-  /// Either the [duration] or the [enddate] will be defined.
+  /// Either the [duration] or the [endDate] will be defined.
   final IsoDuration? duration;
 
   /// The end date
   ///
-  /// Either the [duration] or the [enddate] will be defined.
+  /// Either the [duration] or the [endDate] will be defined.
   final DateTime? endDate;
 
   static int _getSeparatorIndex(String content) {
@@ -1544,6 +1547,7 @@ class Period {
   }
 
   /// Parses a period from the given [textValue].
+  // ignore: prefer_constructors_over_static_methods
   static Period parse(String textValue) {
     final startDate = _parseStartDate(textValue);
     final duration = _parseDuration(textValue);
@@ -1668,8 +1672,8 @@ class IsoDuration {
         ..write('D');
     }
     if (hours != 0 || minutes != 0 || seconds != 0 || buffer.length == 1) {
-      buffer.write('T');
       buffer
+        ..write('T')
         ..write(hours)
         ..write('H')
         ..write(minutes)
@@ -1728,6 +1732,7 @@ class IsoDuration {
   /// The formmat is defined as `P[n]Y[n]M[n]DT[n]H[n]M[n]S`
   /// Example: `P3WT1H` means 3 weeks and 1 hour.
   /// Compare https://en.wikipedia.org/wiki/ISO_8601#Durations
+  // ignore: prefer_constructors_over_static_methods
   static IsoDuration parse(String textValue) {
     /// Note ISO_8601 allows floating numbers, compare
     /// https://en.wikipedia.org/wiki/ISO_8601#Durations,
@@ -1740,41 +1745,39 @@ class IsoDuration {
       );
     }
     final isNegativeDuration = textValue.startsWith('-');
-    if (isNegativeDuration) {
-      textValue = textValue.substring(1);
-    }
+    final content = isNegativeDuration ? textValue.substring(1) : textValue;
     var years = 0, months = 0, weeks = 0, days = 0;
     var startIndex = 1;
-    if (!textValue.startsWith('PT')) {
-      final timeIndex = textValue.indexOf('T');
-      final yearsResult = _parseSection(textValue, startIndex, 'Y');
+    if (!content.startsWith('PT')) {
+      final timeIndex = content.indexOf('T');
+      final yearsResult = _parseSection(content, startIndex, 'Y');
       startIndex = yearsResult.index;
       years = yearsResult.result;
       final monthsResult = _parseSection(
-        textValue,
+        content,
         startIndex,
         'M',
         maxIndex: timeIndex,
       ); // M can also stand for minutes after the T
       startIndex = monthsResult.index;
       months = monthsResult.result;
-      final weeksResult = _parseSection(textValue, startIndex, 'W');
+      final weeksResult = _parseSection(content, startIndex, 'W');
       startIndex = weeksResult.index;
       weeks = weeksResult.result;
-      final daysResult = _parseSection(textValue, startIndex, 'D');
+      final daysResult = _parseSection(content, startIndex, 'D');
       startIndex = daysResult.index;
       days = daysResult.result;
     }
     var hours = 0, minutes = 0, seconds = 0;
-    if (startIndex < textValue.length && textValue[startIndex] == 'T') {
+    if (startIndex < content.length && content[startIndex] == 'T') {
       startIndex++;
-      final hoursResult = _parseSection(textValue, startIndex, 'H');
+      final hoursResult = _parseSection(content, startIndex, 'H');
       hours = hoursResult.result;
       startIndex = hoursResult.index;
-      final minutesResult = _parseSection(textValue, startIndex, 'M');
+      final minutesResult = _parseSection(content, startIndex, 'M');
       minutes = minutesResult.result;
       startIndex = minutesResult.index;
-      final secondsResult = _parseSection(textValue, startIndex, 'S');
+      final secondsResult = _parseSection(content, startIndex, 'S');
       seconds = secondsResult.result;
     }
 
@@ -1821,7 +1824,7 @@ extension DurationExtension on Duration {
 
 /// To specify the free or busy time type.
 ///
-/// Compare [ParameterType.freeBusyTimeType], [FreeBusyType]
+/// Compare [ParameterType.freeBusyTimeType]
 enum FreeBusyTimeType {
   /// The user is free.
   free,
@@ -1903,7 +1906,7 @@ extension ExtensionCommonCalendarUserTypeValue on CalendarUserType {
 /// Specifies the relationship of the alarm trigger with respect to the
 /// start or end of the calendar component.
 ///
-/// It is used for example in the `RELATED` parameter, [TriggerAlarm]
+/// It is used for example in the `RELATED` parameter, [VAlarm]
 enum AlarmTriggerRelationship {
   /// the trigger is specified relative to the start of the calendar component
   start,
@@ -2216,7 +2219,7 @@ enum Method {
   ///
   /// Event attendees may set their status (PARTSTAT) to ACCEPTED,
   /// DECLINED, TENTATIVE, or DELEGATED.
-  /// Todo attendees MAY set PARTSTAT to ACCEPTED, DECLINED, TENTATIVE,
+  /// Attendees of a [VTodo] MAY set PARTSTAT to ACCEPTED, DECLINED, TENTATIVE,
   /// DELEGATED, PARTIAL, and COMPLETED.
   ///
   /// Applicable for [VEvent], [VFreeBusy], [VTodo]

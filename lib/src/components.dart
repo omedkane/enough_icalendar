@@ -658,7 +658,8 @@ class VCalendar extends VComponent {
       ..version = '2.0'
       ..method = Method.reply;
     // check if this attendee was delegated:
-    if (attendee == null) {
+    var replyAttendee = attendee;
+    if (replyAttendee == null) {
       Uri? delegatedFrom;
       final childEvent =
           children.firstWhereOrNull((c) => c is VEvent) as VEvent?;
@@ -668,20 +669,20 @@ class VCalendar extends VComponent {
         );
         delegatedFrom = existing?.delegatedFrom;
       }
-      attendee = AttendeeProperty.create(
+      replyAttendee = AttendeeProperty.create(
         attendeeEmail: attendeeEmail,
         participantStatus: participantStatus,
         delegatedToEmail: delegatedToEmail,
         delegatedFromUri: delegatedFrom,
       );
-      if (attendee == null) {
+      if (replyAttendee == null) {
         throw StateError('Unable to create attendee for $attendeeEmail');
       }
     }
     for (final child in children) {
       if (child.canReply) {
         final replyChild = child.reply(
-          attendee,
+          replyAttendee,
           comment: comment,
           parent: reply,
         );
@@ -960,31 +961,32 @@ class VCalendar extends VComponent {
       !(toEmail == null && to == null),
       'Either to or toEmail must be specified.',
     );
-    final forDelegatee = copy() as VCalendar;
-    forDelegatee.method = Method.request;
+    final forDelegatee = copy() as VCalendar..method = Method.request;
     final event =
         forDelegatee.children.firstWhereOrNull((ev) => ev is VEvent) as VEvent?;
     if (event != null) {
       if (comment != null) {
         event.comment = comment;
       }
-      event.removeAttendeeWithEmail(fromEmail);
-      event.addAttendee(
-        AttendeeProperty.create(
-          attendeeEmail: fromEmail,
-          participantStatus: ParticipantStatus.delegated,
-          delegatedToEmail: toEmail,
-          delegatedToUri: to?.uri,
-        )!,
-      );
+      event
+        ..removeAttendeeWithEmail(fromEmail)
+        ..addAttendee(
+          AttendeeProperty.create(
+            attendeeEmail: fromEmail,
+            participantStatus: ParticipantStatus.delegated,
+            delegatedToEmail: toEmail,
+            delegatedToUri: to?.uri,
+          )!,
+        );
       to ??= AttendeeProperty.create(
         attendeeEmail: toEmail,
         participantStatus: toStatus,
         rsvp: rsvp,
         delegatedFromEmail: fromEmail,
       )!;
-      event.removeAttendeeWithUri(to.uri);
-      event.addAttendee(to);
+      event
+        ..removeAttendeeWithUri(to.uri)
+        ..addAttendee(to);
     }
     final forOrganizer = replyWithParticipantStatus(
       ParticipantStatus.delegated,
@@ -1093,23 +1095,24 @@ class VCalendar extends VComponent {
   static String createUid({String? domain, Uri? organizerUri}) {
     final buffer = StringBuffer();
     _createRandomId(buffer: buffer);
-    if (domain == null) {
+    var uidDomain = domain;
+    if (uidDomain == null) {
       if (organizerUri != null) {
         if (organizerUri.host.isNotEmpty) {
-          domain = organizerUri.host;
+          uidDomain = organizerUri.host;
         } else {
           final path = organizerUri.path;
           final atIndex = path.indexOf('@');
           if (atIndex != -1) {
-            domain = path.substring(atIndex + 1);
+            uidDomain = path.substring(atIndex + 1);
           }
         }
       }
-      domain ??= 'enough.de';
+      uidDomain ??= 'enough.de';
     }
     buffer
       ..write('@')
-      ..write(domain);
+      ..write(uidDomain);
     return buffer.toString();
   }
 }
@@ -1563,7 +1566,7 @@ class VEvent extends _EventTodoJournalComponent {
       getProperty<TextProperty>(TextProperty.propertyNameResources)?.text;
 
   /// Set the resources required for this event
-  set resource(String? value) => setOrRemoveProperty(
+  set resources(String? value) => setOrRemoveProperty(
     TextProperty.propertyNameResources,
     TextProperty.create(TextProperty.propertyNameResources, value),
   );
@@ -1764,7 +1767,7 @@ class VTodo extends _EventTodoJournalComponent {
       getProperty<TextProperty>(TextProperty.propertyNameResources)?.text;
 
   /// Set the resources required for this event
-  set resource(String? value) => setOrRemoveProperty(
+  set resources(String? value) => setOrRemoveProperty(
     TextProperty.propertyNameResources,
     TextProperty.create(TextProperty.propertyNameResources, value),
   );
@@ -1927,7 +1930,7 @@ class VTimezonePhase extends VComponent {
     )!,
   );
 
-  //TODO the name property can occur more than once in theory
+  // TODO(enough): the name property can occur more than once in theory
   /// Retrieves the (first) name of the timezone
   String? get timezoneName => getProperty<TextProperty>(
     TextProperty.propertyNameTimezoneName,
@@ -2059,6 +2062,10 @@ class VAlarm extends VComponent {
         TriggerProperty.propertyName,
       )?.triggerRelation ??
       AlarmTriggerRelationship.start;
+
+  /// Retrieves the trigger property
+  TriggerProperty? get trigger =>
+      getProperty<TriggerProperty>(TriggerProperty.propertyName);
 
   /// Sets the trigger, this is useful when you also want to specify the
   /// [AlarmTriggerRelationship], for example

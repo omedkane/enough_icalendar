@@ -1,3 +1,5 @@
+// ignore_for_file: lines_longer_than_80_chars
+
 import 'package:enough_icalendar/enough_icalendar.dart';
 import 'package:test/test.dart';
 
@@ -990,15 +992,13 @@ END:VCALENDAR\r
         description:
             'Let us discuss how to proceed with the enough_icalendar development. It seems that basic functionality is now covered. What\'s next?',
         productId: 'enough_icalendar/v1',
-      );
+      )..checkValidity();
       // print(invite);
-      invite.checkValidity();
       expect(invite.isVersion2, isTrue);
       expect(invite.isGregorian, isTrue);
       expect(invite.productId, 'enough_icalendar/v1');
       expect(invite.children, isNotEmpty);
-      final event = invite.children.first;
-      event.checkValidity();
+      final event = invite.children.first..checkValidity();
       expect(event, isA<VEvent>());
       expect((event as VEvent).start, DateTime(2021, 07, 21, 10, 00));
       expect(event.end, DateTime(2021, 07, 21, 11, 00));
@@ -1034,15 +1034,13 @@ END:VCALENDAR\r
         description:
             'Let us discuss how to proceed with the enough_icalendar development. It seems that basic functionality is now covered. What\'s next?',
         productId: 'enough_icalendar/v1',
-      );
+      )..checkValidity();
       // print(invite);
-      invite.checkValidity();
       expect(invite.isVersion2, isTrue);
       expect(invite.isGregorian, isTrue);
       expect(invite.productId, 'enough_icalendar/v1');
       expect(invite.children, isNotEmpty);
-      final event = invite.children.first;
-      event.checkValidity();
+      final event = invite.children.first..checkValidity();
       expect(event, isA<VEvent>());
       expect((event as VEvent).start, DateTime.utc(2021, 07, 21, 10, 00));
       expect(event['DTSTART']?.textValue, '20210721T100000Z');
@@ -1081,15 +1079,13 @@ END:VCALENDAR\r
         description:
             'Let us discuss how to proceed with the enough_icalendar development. It seems that basic functionality is now covered. What\'s next?',
         productId: 'enough_icalendar/v1',
-      );
+      )..checkValidity();
       // print(invite);
-      invite.checkValidity();
       expect(invite.isVersion2, isTrue);
       expect(invite.isGregorian, isTrue);
       expect(invite.productId, 'enough_icalendar/v1');
       expect(invite.children, isNotEmpty);
-      final event = invite.children.first;
-      event.checkValidity();
+      final event = invite.children.first..checkValidity();
       expect(event, isA<VEvent>());
       expect((event as VEvent).start, DateTime.utc(2021, 07, 21, 0, 00));
       expect(event['DTSTART']?.textValue, '20210721T000000Z');

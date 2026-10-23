@@ -259,6 +259,7 @@ class Property {
   ///
   /// A [customParser] can be supplied to support custom properties that carry
   /// no standard implementation.
+  // ignore: prefer_constructors_over_static_methods
   static Property parseProperty(
     String definition, {
     Property? Function(String name, String definition)? customParser,
@@ -433,7 +434,7 @@ class RecurrenceRuleProperty extends Property {
   Recurrence get rule => value as Recurrence;
 
   @override
-  Recurrence parse(String texValue) => Recurrence.parse(textValue);
+  Recurrence parse(String textValue) => Recurrence.parse(textValue);
 
   /// Creates a new recurrence rule property when [value] is not null.
   static RecurrenceRuleProperty? create(Recurrence? value) {
@@ -657,30 +658,30 @@ class AttendeeProperty extends UserProperty {
     if (attendeeEmail == null && attendeeUri == null) {
       return null;
     }
-    attendeeUri ??= Uri.parse('mailto:$attendeeEmail');
-    final prop = AttendeeProperty('$propertyName:$attendeeUri');
+    final uri = attendeeUri ?? Uri.parse('mailto:$attendeeEmail');
+    final prop = AttendeeProperty('$propertyName:$uri');
     if (participantStatus != null) {
       prop[ParameterType.participantStatus] = ParticipantStatusParameter.value(
         ParameterType.participantStatus.typeName ?? '',
         participantStatus,
       );
     }
-    if (delegatedToEmail != null) {
-      delegatedToUri = Uri.parse('mailto:$delegatedToEmail');
-    }
-    if (delegatedToUri != null) {
+    final toUri = delegatedToEmail != null
+        ? Uri.parse('mailto:$delegatedToEmail')
+        : delegatedToUri;
+    if (toUri != null) {
       prop[ParameterType.delegateTo] = UriParameter.value(
         ParameterType.delegateTo.typeName ?? '',
-        delegatedToUri,
+        toUri,
       );
     }
-    if (delegatedFromEmail != null) {
-      delegatedFromUri = Uri.parse('mailto:$delegatedFromEmail');
-    }
-    if (delegatedFromUri != null) {
+    final fromUri = delegatedFromEmail != null
+        ? Uri.parse('mailto:$delegatedFromEmail')
+        : delegatedFromUri;
+    if (fromUri != null) {
       prop[ParameterType.delegateFrom] = UriParameter.value(
         ParameterType.delegateFrom.typeName ?? '',
-        delegatedFromUri,
+        fromUri,
       );
     }
     if (role != null) {
@@ -755,15 +756,15 @@ class OrganizerProperty extends UserProperty {
     if (email == null && uri == null) {
       return null;
     }
-    uri ??= Uri.parse('mailto:$email');
-    final prop = OrganizerProperty('$propertyName:$uri');
-    if (sentByEmail != null) {
-      sentBy = Uri.parse('mailto:$sentByEmail');
-    }
-    if (sentBy != null) {
+    final organizerUri = uri ?? Uri.parse('mailto:$email');
+    final prop = OrganizerProperty('$propertyName:$organizerUri');
+    final senderUri = sentByEmail != null
+        ? Uri.parse('mailto:$sentByEmail')
+        : sentBy;
+    if (senderUri != null) {
       prop[ParameterType.sentBy] = UriParameter.value(
         ParameterType.sentBy.typeName ?? '',
-        sentBy,
+        senderUri,
       );
     }
     if (commonName != null) {
@@ -936,10 +937,8 @@ class CategoriesProperty extends Property {
       return null;
     }
     final containsComma = value.any((t) => t.contains(','));
-    if (containsComma) {
-      value = value.map((t) => '"$t"').toList();
-    }
-    final text = value.join(',');
+    final entries = containsComma ? value.map((t) => '"$t"').toList() : value;
+    final text = entries.join(',');
     return CategoriesProperty('$propertyName:$text');
   }
 }
@@ -1056,9 +1055,8 @@ class TextProperty extends Property {
     if (value == null) {
       return null;
     }
-    value = value.replaceAll(',', '\\,');
-    value = value.replaceAll('\n', '\\n');
-    final prop = TextProperty('$name:$value');
+    final escaped = value.replaceAll(',', '\\,').replaceAll('\n', '\\n');
+    final prop = TextProperty('$name:$escaped');
     if (language != null) {
       prop.setParameter(
         TextParameter.value(ParameterType.language.typeName ?? '', language),
@@ -1076,11 +1074,8 @@ class TextProperty extends Property {
   }
 
   /// Parses the [textValue] by unescaping commas and newline characters.
-  static String parseText(String textValue) {
-    textValue = textValue.replaceAll('\\,', ',');
-    textValue = textValue.replaceAll('\\n', '\n');
-    return textValue;
-  }
+  static String parseText(String textValue) =>
+      textValue.replaceAll('\\,', ',').replaceAll('\\n', '\n');
 }
 
 /// Property that defines the iTIP method.
@@ -1167,6 +1162,7 @@ class BooleanProperty extends Property {
   bool get boolValue => value as bool;
 
   /// Creates a new boolean property when [value] is not null.
+  // ignore: avoid_positional_boolean_parameters
   static BooleanProperty? create(String name, bool? value) {
     if (value == null) {
       return null;
@@ -1493,11 +1489,11 @@ class RecurrenceDateProperty extends Property {
     if (value.isEmpty) {
       throw FormatException('Unable to set empty $propertyName');
     }
-    if (value.first.duration != null) {
-      propertyName += ';VALUE=DURATION';
-    }
+    final name = value.first.duration != null
+        ? '$propertyName;VALUE=DURATION'
+        : propertyName;
 
-    return RecurrenceDateProperty('$propertyName:${value.join(',')}');
+    return RecurrenceDateProperty('$name:${value.join(',')}');
   }
 }
 
@@ -1640,7 +1636,7 @@ class RequestStatusProperty extends TextProperty {
   /// `REQUEST-STATUS`
   static const String propertyName = 'REQUEST-STATUS';
 
-  //TODO consider extracting status code from text, compare
+  // TODO(enough): consider extracting status code from text, compare
   // https://datatracker.ietf.org/doc/html/rfc5545#section-3.8.4.5
   /// The request status text.
   String get requestStatus => text;

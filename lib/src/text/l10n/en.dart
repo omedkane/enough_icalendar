@@ -9,6 +9,7 @@ class RruleL10nEn extends RruleL10n {
   const RruleL10nEn._();
 
   /// Creates a new English localization, initializing date formatting first.
+  // ignore: prefer_constructors_over_static_methods
   static RruleL10nEn create() {
     initializeDateFormatting('en');
     return const RruleL10nEn._();

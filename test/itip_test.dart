@@ -1,3 +1,5 @@
+// ignore_for_file: lines_longer_than_80_chars
+
 import 'package:collection/collection.dart' show IterableExtension;
 import 'package:enough_icalendar/enough_icalendar.dart';
 import 'package:test/test.dart';
@@ -36,14 +38,12 @@ END:VCALENDAR
       final reply = iCalendar.replyWithParticipantStatus(
         ParticipantStatus.accepted,
         attendeeEmail: 'b@example.com',
-      );
-      reply.checkValidity();
+      )..checkValidity();
       expect(reply.method, Method.reply);
       expect(reply.version, '2.0');
       expect(reply.children, isNotEmpty);
       expect(reply.children.first, isA<VEvent>());
-      final event = reply.children.first as VEvent;
-      event.checkValidity();
+      final event = reply.children.first as VEvent..checkValidity();
       expect(event.uid, originalEvent.uid);
       expect(event.sequence, originalEvent.sequence);
       expect(event.organizer, originalEvent.organizer);
@@ -500,7 +500,7 @@ END:VCALENDAR
     });
 
     test('Replacing the Organizer', () {
-      //TODO support with specific API necessary?
+      // TODO(enough): support with specific API necessary?
       //  The scenario for this example begins with "A" as the "Organizer" for
       //  a recurring meeting with "B", "C", and "D".  "A" receives a new job
       //  offer in another country and drops out of touch.  "A" left no

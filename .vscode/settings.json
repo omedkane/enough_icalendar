@@ -23,5 +23,9 @@
         "TZID",
         "VCALENDAR",
         "WKST"
-    ]
+    ],
+    "chat.tools.terminal.autoApprove": {
+        "awk": true,
+        "uniq": true
+    }
 }

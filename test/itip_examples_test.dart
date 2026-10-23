@@ -1,3 +1,5 @@
+// ignore_for_file: lines_longer_than_80_chars
+
 import 'package:enough_icalendar/enough_icalendar.dart';
 import 'package:test/test.dart';
 

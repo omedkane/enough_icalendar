@@ -9,6 +9,7 @@ class RruleL10nDe extends RruleL10n {
   const RruleL10nDe._();
 
   /// Creates a new German localization, initializing date formatting first.
+  // ignore: prefer_constructors_over_static_methods
   static RruleL10nDe create() {
     initializeDateFormatting('de');
     return const RruleL10nDe._();
