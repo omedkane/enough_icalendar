@@ -1111,4 +1111,33 @@ END:VCALENDAR\r
       expect(event.organizer?.email, 'a@example.com');
     });
   });
+
+  group('Recurrence dates', () {
+    test('Multiple EXDATE and RDATE properties are all retrieved', () {
+      const input = '''BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Apple Inc.//iPhone OS 27.0//EN
+BEGIN:VEVENT
+DTSTART;TZID=America/Toronto:20261021T210000
+DTSTAMP:20261023T024853Z
+EXDATE;TZID=America/Toronto:20261028T210000
+EXDATE;TZID=America/Toronto:20261104T210000
+EXDATE;TZID=America/Toronto:20261111T210000
+RDATE:20261201T210000Z
+RDATE:20261202T210000Z
+RRULE:FREQ=WEEKLY
+UID:B65A75A0-A257-43A1-9CBF-5E230A421C1A
+END:VEVENT
+END:VCALENDAR''';
+      final calendar = VComponent.parse(input) as VCalendar;
+      final event = calendar.children.first as VEvent;
+      final excluded = event.excludingRecurrenceDates!;
+      expect(excluded.map((d) => d.dateTime).toList(), [
+        DateTime(2026, 10, 28, 21),
+        DateTime(2026, 11, 4, 21),
+        DateTime(2026, 11, 11, 21),
+      ]);
+      expect(event.additionalRecurrenceDates, hasLength(2));
+    });
+  });
 }

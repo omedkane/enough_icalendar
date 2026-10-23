@@ -137,6 +137,21 @@ abstract class VComponent {
   Iterable<T> getProperties<T extends Property>(final String propertyName) =>
       properties.where((prop) => prop.name == propertyName).map((e) => e as T);
 
+  /// Merges the dates of all `RDATE` or `EXDATE` properties named
+  /// [propertyName], as these may occur multiple times.
+  ///
+  /// Returns `null` when there is no such property.
+  List<DateTimeOrDuration>? _collectRecurrenceDates(
+    final String propertyName,
+  ) {
+    final props = getProperties<RecurrenceDateProperty>(propertyName).toList();
+    if (props.isEmpty) {
+      return null;
+    }
+
+    return [for (final prop in props) ...prop.dates];
+  }
+
   /// Retrieves the first property with the name [propertyName]
   Property? operator [](final String propertyName) =>
       properties.firstWhereOrNull((prop) => prop.name == propertyName);
@@ -1324,9 +1339,7 @@ abstract class _EventTodoJournalComponent extends _UidMandatoryComponent {
   ///
   /// Compare [excludingRecurrenceDates], [recurrenceRule]
   List<DateTimeOrDuration>? get additionalRecurrenceDates =>
-      getProperty<RecurrenceDateProperty>(
-        RecurrenceDateProperty.propertyNameRDate,
-      )?.dates;
+      _collectRecurrenceDates(RecurrenceDateProperty.propertyNameRDate);
 
   /// Sets the additional recurrence dates or durations
   set additionalRecurrenceDates(List<DateTimeOrDuration>? value) =>
@@ -1343,9 +1356,7 @@ abstract class _EventTodoJournalComponent extends _UidMandatoryComponent {
   ///
   /// Compare [additionalRecurrenceDates], [recurrenceRule]
   List<DateTimeOrDuration>? get excludingRecurrenceDates =>
-      getProperty<RecurrenceDateProperty>(
-        RecurrenceDateProperty.propertyNameExDate,
-      )?.dates;
+      _collectRecurrenceDates(RecurrenceDateProperty.propertyNameExDate);
 
   /// Sets exluding recurrence dates or durations
   set excludingRecurrenceDates(List<DateTimeOrDuration>? value) =>
@@ -1970,9 +1981,7 @@ class VTimezonePhase extends VComponent {
   ///
   /// Compare [excludingRecurrenceDates], [recurrenceRule]
   List<DateTimeOrDuration>? get additionalRecurrenceDates =>
-      getProperty<RecurrenceDateProperty>(
-        RecurrenceDateProperty.propertyNameRDate,
-      )?.dates;
+      _collectRecurrenceDates(RecurrenceDateProperty.propertyNameRDate);
 
   /// Sets the additional recurrence dates or durations
   set additionalRecurrenceDates(List<DateTimeOrDuration>? value) =>
@@ -1989,9 +1998,7 @@ class VTimezonePhase extends VComponent {
   ///
   /// Compare [additionalRecurrenceDates], [recurrenceRule]
   List<DateTimeOrDuration>? get excludingRecurrenceDates =>
-      getProperty<RecurrenceDateProperty>(
-        RecurrenceDateProperty.propertyNameExDate,
-      )?.dates;
+      _collectRecurrenceDates(RecurrenceDateProperty.propertyNameExDate);
 
   /// Sets exluding recurrence dates or durations
   set excludingRecurrenceDates(List<DateTimeOrDuration>? value) =>
